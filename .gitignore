@@ -1,0 +1,18 @@
+# Build output
+cmake-build-release/
+cmake-build-debug/
+build/
+*.o
+*.a
+
+# Log files generated at runtime
+*.log
+stderr.txt
+
+# macOS metadata
+.DS_Store
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
