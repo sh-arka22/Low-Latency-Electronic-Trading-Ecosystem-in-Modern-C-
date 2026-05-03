@@ -1,0 +1,227 @@
+#pragma once
+
+#include <array>
+#include <string>
+
+#include "common/logging.h"
+#include "common/mem_pool.h"
+#include "common/types.h"
+#include "market_data/market_update.h"
+#include "matcher/me_order.h"
+#include "order_server/client_response.h"
+
+using namespace Common;
+
+namespace Exchange {
+  class MatchingEngine;  // forward decl: avoids include cycle.
+
+  /// Limit Order Book for a single ticker. Holds two sorted price-level lists
+  /// (bids descending, asks ascending) plus O(1) indices by (clientId,orderId)
+  /// and by price. All MEOrder/MEOrdersAtPrice live in MemPools — no new/delete
+  /// on the hot path.
+  class MEOrderBook final {
+  public:
+    explicit MEOrderBook(TickerId ticker_id, Logger *logger,
+                         MatchingEngine *matching_engine);
+
+    ~MEOrderBook();
+
+    /// Handle a NEW order: emit ACCEPTED, attempt match, rest residual.
+    auto add(ClientId client_id, OrderId client_order_id, TickerId ticker_id,
+             Side side, Price price, Qty qty) noexcept -> void;
+
+    /// Handle a CANCEL: emit CANCELED + market CANCEL, or CANCEL_REJECTED.
+    auto cancel(ClientId client_id, OrderId order_id, TickerId ticker_id) noexcept -> void;
+
+    auto toString(bool detailed, bool validity_check) const -> std::string;
+
+    MEOrderBook() = delete;
+    MEOrderBook(const MEOrderBook &) = delete;
+    MEOrderBook(const MEOrderBook &&) = delete;
+    MEOrderBook &operator=(const MEOrderBook &) = delete;
+    MEOrderBook &operator=(const MEOrderBook &&) = delete;
+
+  private:
+    TickerId        ticker_id_       = TickerId_INVALID;
+    MatchingEngine *matching_engine_ = nullptr;
+
+    // Live-order index: cid_oid_to_order_[client_id][order_id] -> MEOrder*.
+    ClientOrderHashMap cid_oid_to_order_;
+
+    // Pools that back every MEOrder/MEOrdersAtPrice in this book.
+    MemPool<MEOrdersAtPrice> orders_at_price_pool_;
+    MemPool<MEOrder>         order_pool_;
+
+    // Heads of the two sorted price-level lists.
+    MEOrdersAtPrice *bids_by_price_ = nullptr;  // highest first
+    MEOrdersAtPrice *asks_by_price_ = nullptr;  // lowest first
+
+    // Price -> MEOrdersAtPrice* (modulo-indexed flat array).
+    OrdersAtPriceHashMap price_orders_at_price_;
+
+    // Reused buffers to avoid per-event allocation.
+    MEClientResponse client_response_;
+    MEMarketUpdate   market_update_;
+
+    OrderId next_market_order_id_ = 1;
+
+    std::string time_str_;
+    Logger     *logger_ = nullptr;
+
+    // ---- private helpers ----------------------------------------------
+
+    auto generateNewMarketOrderId() noexcept -> OrderId {
+      return next_market_order_id_++;
+    }
+
+    auto priceToIndex(Price price) const noexcept {
+      return price % ME_MAX_PRICE_LEVELS;
+    }
+
+    auto getOrdersAtPrice(Price price) const noexcept -> MEOrdersAtPrice * {
+      return price_orders_at_price_.at(priceToIndex(price));
+    }
+
+    /// Insert a new price level into the appropriate side's sorted list.
+    /// Bids are sorted descending; asks ascending. List is circular doubly-linked
+    /// with head = best price.
+    auto addOrdersAtPrice(MEOrdersAtPrice *new_orders_at_price) noexcept {
+      price_orders_at_price_.at(priceToIndex(new_orders_at_price->price_)) =
+          new_orders_at_price;
+
+      const auto best = (new_orders_at_price->side_ == Side::BUY ? bids_by_price_
+                                                                 : asks_by_price_);
+
+      if (UNLIKELY(!best)) {
+        // empty side: new entry becomes its own head.
+        (new_orders_at_price->side_ == Side::BUY ? bids_by_price_ : asks_by_price_)
+            = new_orders_at_price;
+        new_orders_at_price->prev_entry_ = new_orders_at_price->next_entry_ =
+            new_orders_at_price;
+        return;
+      }
+
+      // Walk the list to find the insertion point.
+      auto target    = best;
+      bool add_after = ((new_orders_at_price->side_ == Side::SELL && new_orders_at_price->price_ > target->price_) ||
+                        (new_orders_at_price->side_ == Side::BUY  && new_orders_at_price->price_ < target->price_));
+      if (add_after) {
+        target    = target->next_entry_;
+        add_after = ((new_orders_at_price->side_ == Side::SELL && new_orders_at_price->price_ > target->price_) ||
+                     (new_orders_at_price->side_ == Side::BUY  && new_orders_at_price->price_ < target->price_));
+      }
+      while (add_after && target != best) {
+        add_after = ((new_orders_at_price->side_ == Side::SELL && new_orders_at_price->price_ > target->price_) ||
+                     (new_orders_at_price->side_ == Side::BUY  && new_orders_at_price->price_ < target->price_));
+        if (add_after) target = target->next_entry_;
+      }
+
+      if (add_after) {
+        // Insert after target.
+        if (target == best) target = best->prev_entry_;
+        new_orders_at_price->prev_entry_  = target;
+        target->next_entry_->prev_entry_  = new_orders_at_price;
+        new_orders_at_price->next_entry_  = target->next_entry_;
+        target->next_entry_               = new_orders_at_price;
+      } else {
+        // Insert before target.
+        new_orders_at_price->prev_entry_ = target->prev_entry_;
+        new_orders_at_price->next_entry_ = target;
+        target->prev_entry_->next_entry_ = new_orders_at_price;
+        target->prev_entry_              = new_orders_at_price;
+
+        // If we beat the current best, promote ourselves to head.
+        if ((new_orders_at_price->side_ == Side::BUY  && new_orders_at_price->price_ > best->price_) ||
+            (new_orders_at_price->side_ == Side::SELL && new_orders_at_price->price_ < best->price_)) {
+          target->next_entry_ = (target->next_entry_ == best ? new_orders_at_price : target->next_entry_);
+          (new_orders_at_price->side_ == Side::BUY ? bids_by_price_ : asks_by_price_) =
+              new_orders_at_price;
+        }
+      }
+    }
+
+    /// Drop an empty price level from its side's sorted list.
+    auto removeOrdersAtPrice(Side side, Price price) noexcept {
+      const auto best             = (side == Side::BUY ? bids_by_price_ : asks_by_price_);
+      auto       orders_at_price  = getOrdersAtPrice(price);
+
+      if (UNLIKELY(orders_at_price->next_entry_ == orders_at_price)) {
+        // Sole level on this side.
+        (side == Side::BUY ? bids_by_price_ : asks_by_price_) = nullptr;
+      } else {
+        orders_at_price->prev_entry_->next_entry_ = orders_at_price->next_entry_;
+        orders_at_price->next_entry_->prev_entry_ = orders_at_price->prev_entry_;
+
+        if (orders_at_price == best) {
+          (side == Side::BUY ? bids_by_price_ : asks_by_price_) =
+              orders_at_price->next_entry_;
+        }
+        orders_at_price->prev_entry_ = orders_at_price->next_entry_ = nullptr;
+      }
+
+      price_orders_at_price_.at(priceToIndex(price)) = nullptr;
+      orders_at_price_pool_.deallocate(orders_at_price);
+    }
+
+    /// Next FIFO priority slot at this price level.
+    auto getNextPriority(Price price) noexcept -> Priority {
+      const auto orders_at_price = getOrdersAtPrice(price);
+      if (!orders_at_price) return Priority{1};
+      return orders_at_price->first_me_order_->prev_order_->priority_ + 1;
+    }
+
+    auto match(TickerId ticker_id, ClientId client_id, Side side,
+               OrderId client_order_id, OrderId new_market_order_id,
+               MEOrder *passive_order, Qty *leaves_qty) noexcept;
+
+    auto checkForMatch(ClientId client_id, OrderId client_order_id,
+                       TickerId ticker_id, Side side, Price price, Qty qty,
+                       Qty new_market_order_id) noexcept;
+
+    /// Unlink a resting order; if it was the last at its price, drop the level.
+    auto removeOrder(MEOrder *order) noexcept {
+      auto orders_at_price = getOrdersAtPrice(order->price_);
+
+      if (order->prev_order_ == order) {
+        // Sole order at this level.
+        removeOrdersAtPrice(order->side_, order->price_);
+      } else {
+        const auto before = order->prev_order_;
+        const auto after  = order->next_order_;
+        before->next_order_ = after;
+        after->prev_order_  = before;
+
+        if (orders_at_price->first_me_order_ == order) {
+          orders_at_price->first_me_order_ = after;
+        }
+        order->prev_order_ = order->next_order_ = nullptr;
+      }
+
+      cid_oid_to_order_.at(order->client_id_).at(order->client_order_id_) = nullptr;
+      order_pool_.deallocate(order);
+    }
+
+    /// Append a fresh order to its price level's circular list (FIFO tail).
+    /// Creates a new MEOrdersAtPrice if the level didn't exist.
+    auto addOrder(MEOrder *order) noexcept {
+      const auto orders_at_price = getOrdersAtPrice(order->price_);
+
+      if (!orders_at_price) {
+        order->next_order_ = order->prev_order_ = order;
+        auto new_level = orders_at_price_pool_.allocate(order->side_, order->price_,
+                                                        order, nullptr, nullptr);
+        addOrdersAtPrice(new_level);
+      } else {
+        auto first = orders_at_price->first_me_order_;
+        first->prev_order_->next_order_ = order;
+        order->prev_order_              = first->prev_order_;
+        order->next_order_              = first;
+        first->prev_order_              = order;
+      }
+
+      cid_oid_to_order_.at(order->client_id_).at(order->client_order_id_) = order;
+    }
+  };
+
+  typedef std::array<MEOrderBook *, ME_MAX_TICKERS> OrderBookHashMap;
+}
