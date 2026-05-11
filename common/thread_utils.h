@@ -16,15 +16,15 @@ namespace Common {
   /// Pin the current thread to the given core. Linux-only; on other OSes this
   /// is a no-op so the rest of the system still runs (just without affinity).
   inline auto setThreadCore(int core_id) noexcept -> bool {
-#if defined(__linux__)
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    CPU_SET(core_id, &cpuset);
-    return pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset) == 0;
-#else
-    (void)core_id;
-    return true;
-#endif
+    #if defined(__linux__)
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(core_id, &cpuset);
+        return pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset) == 0;
+    #else
+        (void)core_id;
+        return true;
+    #endif
   }
 
   /// Spawn a named thread, optionally pin it to a core, and run func(args...).
