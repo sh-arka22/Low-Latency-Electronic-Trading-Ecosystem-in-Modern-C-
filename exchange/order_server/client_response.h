@@ -60,6 +60,21 @@ namespace Exchange {
     }
   };
 
+  /// TCP wire format = per-client sequence number + MEClientResponse.
+  struct OMClientResponse {
+    size_t           seq_num_ = 0;
+    MEClientResponse me_client_response_;
+
+    auto toString() const {
+      std::stringstream ss;
+      ss << "OMClientResponse ["
+         << "seq:" << seq_num_
+         << " "    << me_client_response_.toString()
+         << "]";
+      return ss.str();
+    }
+  };
+
 #pragma pack(pop)
 
   typedef LFQueue<MEClientResponse> ClientResponseLFQueue;
