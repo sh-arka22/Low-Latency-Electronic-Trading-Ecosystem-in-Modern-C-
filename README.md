@@ -10,38 +10,38 @@ A high-performance, low-latency electronic trading system written in C++20. Buil
 ┌─────────────────────────────────────────────────────────────────┐
 │                        EXCHANGE SIDE                            │
 │                                                                 │
-│  ┌──────────────────┐   LFQueue    ┌────────────────────────┐  │
-│  │  Order Gateway   │ ──────────► │   Matching Engine      │  │
-│  │  Server (TCP)    │ ◄────────── │   (LOB + Matching)     │  │
-│  └──────────────────┘   LFQueue    └──────────┬─────────────┘  │
-│                                               │ LFQueue        │
-│                                    ┌──────────▼─────────────┐  │
-│                                    │  Market Data Publisher │  │
-│                                    │  (UDP Multicast)       │  │
-│                                    └────────────────────────┘  │
+│  ┌──────────────────┐   LFQueue    ┌────────────────────────┐   │ 
+│  │  Order Gateway   │ ──────────► │   Matching Engine       │   │
+│  │  Server (TCP)    │ ◄────────── │   (LOB + Matching)      │   │
+│  └──────────────────┘   LFQueue    └──────────┬─────────────┘   │
+│                                               │ LFQueue         │
+│                                    ┌──────────▼─────────────┐   │
+│                                    │  Market Data Publisher │   │
+│                                    │  (UDP Multicast)       │   │
+│                                    └────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
            TCP ▲                          UDP Multicast ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    MARKET PARTICIPANT SIDE                      │
 │                                                                 │
-│  ┌──────────────────┐              ┌────────────────────────┐  │
-│  │  Order Gateway   │              │  Market Data Consumer  │  │
-│  │  Client (TCP)    │              │  (UDP subscriber)      │  │
-│  └────────┬─────────┘              └──────────┬─────────────┘  │
-│           │ LFQueue                           │ LFQueue        │
-│           └──────────────┬────────────────────┘                │
+│  ┌──────────────────┐              ┌────────────────────────┐   │
+│  │  Order Gateway   │              │  Market Data Consumer  │   │
+│  │  Client (TCP)    │              │  (UDP subscriber)      │   │
+│  └────────┬─────────┘              └──────────┬─────────────┘   │
+│           │ LFQueue                           │ LFQueue         │
+│           └──────────────┬────────────────────┘                 │
 │                          ▼                                      │
-│              ┌───────────────────────┐                         │
-│              │   Trading Engine      │                         │
-│              │  ┌─────────────────┐  │                         │
-│              │  │ Client Order    │  │                         │
-│              │  │    Book         │  │                         │
-│              │  │ Feature Engine  │  │                         │
-│              │  │ Trading Strategy│  │                         │
-│              │  │ Order Manager   │  │                         │
-│              │  │  Risk Manager   │  │                         │
-│              │  └─────────────────┘  │                         │
-│              └───────────────────────┘                         │
+│              ┌───────────────────────┐                          │
+│              │   Trading Engine      │                          │
+│              │  ┌─────────────────┐  │                          │
+│              │  │ Client Order    │  │                          │
+│              │  │    Book         │  │                          │
+│              │  │ Feature Engine  │  │                          │
+│              │  │ Trading Strategy│  │                          │
+│              │  │ Order Manager   │  │                          │
+│              │  │  Risk Manager   │  │                          │
+│              │  └─────────────────┘  │                          │
+│              └───────────────────────┘                          │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
