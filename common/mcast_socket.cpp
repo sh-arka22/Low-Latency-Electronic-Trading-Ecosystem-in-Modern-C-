@@ -19,6 +19,16 @@ namespace Common {
     return Common::join(socket_fd_, ip);
   }
 
+  auto McastSocket::leave(const std::string &ip, int /*port*/) -> void {
+    if (socket_fd_ < 0) return;
+    const ip_mreq mreq{{inet_addr(ip.c_str())}, {htonl(INADDR_ANY)}};
+    setsockopt(socket_fd_, IPPROTO_IP, IP_DROP_MEMBERSHIP, &mreq, sizeof(mreq));
+    ::close(socket_fd_);
+    socket_fd_             = -1;
+    next_rcv_valid_index_  = 0;
+    next_send_valid_index_ = 0;
+  }
+
   auto McastSocket::send(const void *data, size_t len) noexcept -> void {
     if (UNLIKELY(next_send_valid_index_ + len > outbound_data_.size())) {
       FATAL("McastSocket outbound buffer overflow");

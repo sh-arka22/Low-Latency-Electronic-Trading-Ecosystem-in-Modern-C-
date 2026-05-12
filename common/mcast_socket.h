@@ -30,6 +30,12 @@ namespace Common {
     /// Join a multicast group (subscriber side only).
     auto join(const std::string &ip) -> bool;
 
+    /// Drop multicast membership and close the socket. Symmetric with init()+join():
+    /// after leave() the McastSocket can be init()/join()'d again on a fresh fd.
+    /// Used by MarketDataConsumer to detach from the snapshot stream once
+    /// snapshot recovery completes.
+    auto leave(const std::string &ip, int port) -> void;
+
     /// Append bytes to outbound buffer.
     auto send(const void *data, size_t len) noexcept -> void;
 
