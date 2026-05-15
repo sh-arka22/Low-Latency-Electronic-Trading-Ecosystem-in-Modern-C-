@@ -1,10 +1,12 @@
 #pragma once
 
-// TEMPORARY Chapter 8 stub. The real TradeEngine is implemented in Chapter 9
-// and will replace this file. It exists here only so market_order_book.cpp
-// can compile in isolation — once Ch9 lands, this stub is overwritten.
+// TEMPORARY Chapter 8/9 stub. The real TradeEngine is implemented in
+// Chapter 10 and will replace this file. It exists here so
+// market_order_book.cpp and order_manager.cpp can compile in isolation
+// — once Ch10 lands, this stub is overwritten.
 
 #include "common/types.h"
+#include "exchange/order_server/client_request.h"
 #include "market_data/market_update.h"
 #include "strategy/market_order.h"
 
@@ -20,5 +22,12 @@ namespace Trading {
 
     auto onOrderBookUpdate(TickerId /*ticker_id*/, Price /*price*/, Side /*side*/,
                            MarketOrderBook * /*book*/) noexcept -> void {}
+
+    auto clientId() const noexcept -> ClientId { return client_id_; }
+
+    auto sendClientRequest(const Exchange::MEClientRequest * /*req*/) noexcept -> void {}
+
+  private:
+    ClientId client_id_ = ClientId_INVALID;
   };
 }
