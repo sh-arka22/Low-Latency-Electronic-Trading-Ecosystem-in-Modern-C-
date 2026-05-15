@@ -1,8 +1,10 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <cstddef>
 #include <limits>
+#include <sstream>
 #include <string>
 
 #include "common/macros.h"
@@ -68,7 +70,8 @@ namespace Common {
   enum class Side : int8_t {
     INVALID = 0,
     BUY     = 1,
-    SELL    = -1
+    SELL    = -1,
+    MAX     = 2
   };
 
   inline auto sideToString(Side side) -> std::string {
@@ -76,7 +79,50 @@ namespace Common {
       case Side::BUY:     return "BUY";
       case Side::SELL:    return "SELL";
       case Side::INVALID: return "INVALID";
+      case Side::MAX:     return "MAX";
     }
     return "UNKNOWN";
   }
+
+  inline constexpr auto sideToIndex(Side side) noexcept {
+    return static_cast<size_t>(static_cast<int>(side) + 1);
+  }
+
+  inline constexpr auto sideToValue(Side side) noexcept {
+    return static_cast<int>(side);
+  }
+
+  struct RiskCfg {
+    Qty    max_order_size_ = 0;
+    Qty    max_position_   = 0;
+    double max_loss_       = 0;
+
+    auto toString() const {
+      std::stringstream ss;
+      ss << "RiskCfg{"
+         << "max-order-size:" << qtyToString(max_order_size_) << " "
+         << "max-position:"   << qtyToString(max_position_)   << " "
+         << "max-loss:"       << max_loss_
+         << "}";
+      return ss.str();
+    }
+  };
+
+  struct TradeEngineCfg {
+    Qty    clip_      = 0;
+    double threshold_ = 0;
+    RiskCfg risk_cfg_;
+
+    auto toString() const {
+      std::stringstream ss;
+      ss << "TradeEngineCfg{"
+         << "clip:"   << qtyToString(clip_) << " "
+         << "thresh:" << threshold_         << " "
+         << "risk:"   << risk_cfg_.toString()
+         << "}";
+      return ss.str();
+    }
+  };
+
+  typedef std::array<TradeEngineCfg, ME_MAX_TICKERS> TradeEngineCfgHashMap;
 }
