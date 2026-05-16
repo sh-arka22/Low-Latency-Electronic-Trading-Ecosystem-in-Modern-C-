@@ -145,6 +145,15 @@ namespace Common {
                           reinterpret_cast<const char *>(&one), sizeof(one)) == 0,
                "SO_REUSEADDR failed. errno:" + std::string(std::strerror(errno)));
 
+#ifdef SO_REUSEPORT
+        // Required on macOS / BSD so multiple processes can join the same UDP
+        // multicast group on the same port (otherwise bind() returns EADDRINUSE).
+        if (cfg.is_udp_) {
+          setsockopt(socket_fd, SOL_SOCKET, SO_REUSEPORT,
+                     reinterpret_cast<const char *>(&one), sizeof(one));
+        }
+#endif
+
         sockaddr_in addr{};
         addr.sin_family      = AF_INET;
         addr.sin_port        = htons(static_cast<uint16_t>(cfg.port_));
