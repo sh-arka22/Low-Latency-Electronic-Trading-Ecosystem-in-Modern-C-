@@ -18,6 +18,10 @@ list(APPEND LIBS pthread)
 
 include_directories(${PROJECT_SOURCE_DIR})
 include_directories(${PROJECT_SOURCE_DIR}/exchange)
+include_directories(${PROJECT_SOURCE_DIR}/trading)
 
 add_executable(exchange_main exchange/exchange_main.cpp)
 target_link_libraries(exchange_main PUBLIC ${LIBS})
+
+add_executable(trading_main trading/trading_main.cpp)
+target_link_libraries(trading_main PUBLIC ${LIBS})
