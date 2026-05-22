@@ -57,6 +57,8 @@ namespace Trading {
   // or buffers for later replay via queueMessage().
   // --------------------------------------------------------------------
   auto MarketDataConsumer::recvCallback(Common::McastSocket *socket) noexcept -> void {
+    TTT_MEASURE(T7_MarketDataConsumer_UDP_read, logger_);
+
     const auto is_snapshot = (socket->socket_fd_ == snapshot_mcast_socket_.socket_fd_);
 
     // Defensive: snapshot data arriving when we're not in recovery is unexpected.
@@ -100,6 +102,8 @@ namespace Trading {
           auto next_write = incoming_md_updates_->getNextToWriteTo();
           *next_write = std::move(request->me_market_update_);
           incoming_md_updates_->updateWriteIndex();
+
+          TTT_MEASURE(T8_MarketDataConsumer_LFQueue_write, logger_);
         }
       }
       // Slide any trailing partial message left in the buffer.

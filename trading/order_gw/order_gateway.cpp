@@ -38,9 +38,17 @@ namespace Trading {
            client_request;
            client_request = outgoing_requests_->getNextToRead()) {
 
+        TTT_MEASURE(T11_OrderGateway_LFQueue_read, logger_);
+
+        START_MEASURE(Trading_TCPSocket_send);
         tcp_socket_.send(&next_outgoing_seq_num_, sizeof(next_outgoing_seq_num_));
         tcp_socket_.send(client_request, sizeof(Exchange::MEClientRequest));
+        END_MEASURE(Trading_TCPSocket_send, logger_);
+
         outgoing_requests_->updateReadIndex();
+
+        TTT_MEASURE(T12_OrderGateway_TCP_write, logger_);
+
         ++next_outgoing_seq_num_;
       }
     }
@@ -54,6 +62,8 @@ namespace Trading {
   // and we don't want to crash on it.
   // --------------------------------------------------------------------
   auto OrderGateway::recvCallback(Common::TCPSocket *socket, Nanos /*rx_time*/) noexcept -> void {
+    TTT_MEASURE(T7t_OrderGateway_TCP_read, logger_);
+
     if (socket->next_rcv_valid_index_ >= sizeof(Exchange::OMClientResponse)) {
       size_t i = 0;
       for (; i + sizeof(Exchange::OMClientResponse) <= socket->next_rcv_valid_index_;
@@ -82,6 +92,8 @@ namespace Trading {
         auto next_write = incoming_responses_->getNextToWriteTo();
         *next_write = std::move(response->me_client_response_);
         incoming_responses_->updateWriteIndex();
+
+        TTT_MEASURE(T8t_OrderGateway_LFQueue_write, logger_);
       }
       // Slide any trailing partial response left in the buffer.
       memcpy(socket->inbound_data_.data(),

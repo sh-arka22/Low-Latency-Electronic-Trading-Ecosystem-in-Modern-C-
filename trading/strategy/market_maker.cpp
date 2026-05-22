@@ -56,7 +56,9 @@ namespace Trading {
       const auto ask_price = bbo->ask_price_ +
           (bbo->ask_price_ - fair_price >= threshold ? 0 : 1);
 
+      START_MEASURE(Trading_OrderManager_moveOrders);
       order_manager_->moveOrders(ticker_id, bid_price, ask_price, clip);
+      END_MEASURE(Trading_OrderManager_moveOrders, (*logger_));
     }
   }
 
@@ -74,7 +76,10 @@ namespace Trading {
                  __FILE__, __LINE__, __FUNCTION__,
                  Common::getCurrentTimeStr(&time_str_),
                  client_response->toString().c_str());
+
+    START_MEASURE(Trading_OrderManager_onOrderUpdate);
     order_manager_->onOrderUpdate(client_response);
+    END_MEASURE(Trading_OrderManager_onOrderUpdate, (*logger_));
   }
 
 }
