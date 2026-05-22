@@ -1,5 +1,5 @@
 # Electronic Trading Ecosystem
-
+# BOOK Reference : https://share.google/TQ3zTn3Q0W2XjpQha
 A high-performance, low-latency electronic trading system written in C++20. Built from first principles with zero heap allocation on hot paths, lock-free inter-thread communication, and strict separation between exchange-side and participant-side components.
 
 ---
