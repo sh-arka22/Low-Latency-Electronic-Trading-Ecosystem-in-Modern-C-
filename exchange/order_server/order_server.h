@@ -44,6 +44,8 @@ namespace Exchange {
              outgoing_responses_->size() && client_response;
              client_response = outgoing_responses_->getNextToRead()) {
 
+          TTT_MEASURE(T5t_OrderServer_LFQueue_read, logger_);
+
           auto &next_outgoing_seq_num =
               cid_next_outgoing_seq_num_[client_response->client_id_];
 
@@ -66,6 +68,8 @@ namespace Exchange {
 
           outgoing_responses_->updateReadIndex();
           ++next_outgoing_seq_num;
+
+          TTT_MEASURE(T6t_OrderServer_TCP_write, logger_);
         }
       }
     }
@@ -74,6 +78,8 @@ namespace Exchange {
     /// Decodes whole OMClientRequest messages out of the inbound buffer,
     /// validates seq + socket identity, then stages each into FIFOSequencer.
     auto recvCallback(Common::TCPSocket *socket, Common::Nanos rx_time) noexcept {
+      TTT_MEASURE(T1_OrderServer_TCP_read, logger_);
+
       logger_.log("%:% %() % Received fd:% len:% rx:%\n", __FILE__, __LINE__,
                   __FUNCTION__, Common::getCurrentTimeStr(&time_str_),
                   socket->socket_fd_, socket->next_rcv_valid_index_, rx_time);
@@ -115,8 +121,10 @@ namespace Exchange {
           }
           ++next_exp_seq_num;
 
+          START_MEASURE(Exchange_FIFOSequencer_addClientRequest);
           fifo_sequencer_.addClientRequest(rx_time,
                                            request->me_client_request_);
+          END_MEASURE(Exchange_FIFOSequencer_addClientRequest, logger_);
         }
 
         // Compact any partial trailing message back to the front of the buffer.
@@ -129,7 +137,9 @@ namespace Exchange {
 
     /// Invoked once per sendAndRecv() round after all sockets have been drained.
     auto recvFinishedCallback() noexcept {
+      START_MEASURE(Exchange_FIFOSequencer_sequenceAndPublish);
       fifo_sequencer_.sequenceAndPublish();
+      END_MEASURE(Exchange_FIFOSequencer_sequenceAndPublish, logger_);
     }
 
     OrderServer() = delete;

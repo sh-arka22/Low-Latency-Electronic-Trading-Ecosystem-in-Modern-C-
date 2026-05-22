@@ -33,13 +33,17 @@ namespace Exchange {
     auto processClientRequest(const MEClientRequest *req) noexcept {
       auto order_book = ticker_order_book_[req->ticker_id_];
       switch (req->type_) {
-        case ClientRequestType::NEW:
+        case ClientRequestType::NEW: {
+          START_MEASURE(Exchange_MEOrderBook_add);
           order_book->add(req->client_id_, req->order_id_, req->ticker_id_,
                           req->side_, req->price_, req->qty_);
-          break;
-        case ClientRequestType::CANCEL:
+          END_MEASURE(Exchange_MEOrderBook_add, logger_);
+        } break;
+        case ClientRequestType::CANCEL: {
+          START_MEASURE(Exchange_MEOrderBook_cancel);
           order_book->cancel(req->client_id_, req->order_id_, req->ticker_id_);
-          break;
+          END_MEASURE(Exchange_MEOrderBook_cancel, logger_);
+        } break;
         default:
           FATAL("Received invalid client-request-type:" +
                 clientRequestTypeToString(req->type_));
@@ -54,6 +58,8 @@ namespace Exchange {
       auto next_write = outgoing_ogw_responses_->getNextToWriteTo();
       *next_write     = std::move(*client_response);
       outgoing_ogw_responses_->updateWriteIndex();
+
+      TTT_MEASURE(T4t_MatchingEngine_LFQueue_write, logger_);
     }
 
     /// Hand a public market update off to the MDP thread.
@@ -63,6 +69,8 @@ namespace Exchange {
       auto next_write = outgoing_md_updates_->getNextToWriteTo();
       *next_write     = *market_update;
       outgoing_md_updates_->updateWriteIndex();
+
+      TTT_MEASURE(T4_MatchingEngine_LFQueue_write, logger_);
     }
 
     /// Hot loop: drain the request queue.
@@ -72,10 +80,16 @@ namespace Exchange {
       while (run_) {
         const auto req = incoming_requests_->getNextToRead();
         if (LIKELY(req)) {
+          TTT_MEASURE(T3_MatchingEngine_LFQueue_read, logger_);
+
           logger_.log("%:% %() % Processing %\n", __FILE__, __LINE__,
                       __FUNCTION__, Common::getCurrentTimeStr(&time_str_),
                       req->toString());
+
+          START_MEASURE(Exchange_MatchingEngine_processClientRequest);
           processClientRequest(req);
+          END_MEASURE(Exchange_MatchingEngine_processClientRequest, logger_);
+
           incoming_requests_->updateReadIndex();
         }
       }

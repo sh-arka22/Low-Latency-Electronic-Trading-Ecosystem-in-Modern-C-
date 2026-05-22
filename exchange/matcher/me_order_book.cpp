@@ -59,7 +59,10 @@ namespace Exchange {
                         ticker_id, passive_order->side_, passive_order->price_,
                         order_qty, Priority_INVALID};
       matching_engine_->sendMarketUpdate(&market_update_);
+
+      START_MEASURE(Exchange_MEOrderBook_removeOrder);
       removeOrder(passive_order);
+      END_MEASURE(Exchange_MEOrderBook_removeOrder, (*logger_));
     } else {
       market_update_ = {MarketUpdateType::MODIFY, passive_order->market_order_id_,
                         ticker_id, passive_order->side_, passive_order->price_,
@@ -80,16 +83,22 @@ namespace Exchange {
       while (leaves_qty && asks_by_price_) {
         const auto best_ask = asks_by_price_->first_me_order_;
         if (LIKELY(price < best_ask->price_)) break;  // no more crosses
+
+        START_MEASURE(Exchange_MEOrderBook_match);
         match(ticker_id, client_id, side, client_order_id, new_market_order_id,
               best_ask, &leaves_qty);
+        END_MEASURE(Exchange_MEOrderBook_match, (*logger_));
       }
     }
     if (side == Side::SELL) {
       while (leaves_qty && bids_by_price_) {
         const auto best_bid = bids_by_price_->first_me_order_;
         if (LIKELY(price > best_bid->price_)) break;
+
+        START_MEASURE(Exchange_MEOrderBook_match);
         match(ticker_id, client_id, side, client_order_id, new_market_order_id,
               best_bid, &leaves_qty);
+        END_MEASURE(Exchange_MEOrderBook_match, (*logger_));
       }
     }
     return leaves_qty;
@@ -107,8 +116,10 @@ namespace Exchange {
                         client_order_id, new_market_order_id, side, price, 0, qty};
     matching_engine_->sendClientResponse(&client_response_);
 
+    START_MEASURE(Exchange_MEOrderBook_checkForMatch);
     const auto leaves_qty = checkForMatch(client_id, client_order_id, ticker_id,
                                           side, price, qty, new_market_order_id);
+    END_MEASURE(Exchange_MEOrderBook_checkForMatch, (*logger_));
 
     if (LIKELY(leaves_qty)) {
       const auto priority = getNextPriority(price);
@@ -116,7 +127,10 @@ namespace Exchange {
       auto order = order_pool_.allocate(ticker_id, client_id, client_order_id,
                                         new_market_order_id, side, price,
                                         leaves_qty, priority, nullptr, nullptr);
+
+      START_MEASURE(Exchange_MEOrderBook_addOrder);
       addOrder(order);
+      END_MEASURE(Exchange_MEOrderBook_addOrder, (*logger_));
 
       market_update_ = {MarketUpdateType::ADD, new_market_order_id, ticker_id,
                         side, price, leaves_qty, priority};

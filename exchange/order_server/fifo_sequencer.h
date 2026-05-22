@@ -52,6 +52,8 @@ namespace Exchange {
         auto       *slot = incoming_requests_->getNextToWriteTo();
         *slot = req.request_;
         incoming_requests_->updateWriteIndex();
+
+        TTT_MEASURE(T2_OrderServer_LFQueue_write, (*logger_));
       }
       pending_size_ = 0;
     }
