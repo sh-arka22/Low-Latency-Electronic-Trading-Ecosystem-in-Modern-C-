@@ -49,3 +49,6 @@ vgcore.*
 *.gcov
 perf.data
 perf.data.old
+
+# Generated notebook outputs
+notebooks/*.html

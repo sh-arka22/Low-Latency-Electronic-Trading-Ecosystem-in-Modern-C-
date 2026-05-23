@@ -25,3 +25,13 @@ target_link_libraries(exchange_main PUBLIC ${LIBS})
 
 add_executable(trading_main trading/trading_main.cpp)
 target_link_libraries(trading_main PUBLIC ${LIBS})
+
+# ── Chapter 12 benchmarks ───────────────────────────────────────────────────
+add_executable(logger_benchmark  benchmarks/logger_benchmark.cpp)
+target_link_libraries(logger_benchmark  PUBLIC ${LIBS})
+
+add_executable(release_benchmark benchmarks/release_benchmark.cpp)
+target_link_libraries(release_benchmark PUBLIC ${LIBS})
+
+add_executable(hash_benchmark    benchmarks/hash_benchmark.cpp)
+target_link_libraries(hash_benchmark    PUBLIC ${LIBS})
