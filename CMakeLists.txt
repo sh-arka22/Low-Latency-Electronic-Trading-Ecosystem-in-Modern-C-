@@ -43,3 +43,7 @@ target_link_libraries(release_benchmark PUBLIC ${LIBS})
 
 add_executable(hash_benchmark    benchmarks/hash_benchmark.cpp)
 target_link_libraries(hash_benchmark    PUBLIC ${LIBS})
+
+# Day 6 — tight-loop rdtsc jitter benchmark for the PERF.md affinity section.
+add_executable(jitter_benchmark  benchmarks/jitter_benchmark.cpp)
+target_link_libraries(jitter_benchmark  PUBLIC ${LIBS})

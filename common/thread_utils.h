@@ -12,6 +12,11 @@
 #include <sys/syscall.h>
 #endif
 
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/thread_policy.h>
+#endif
+
 namespace Common {
   /// Pin the current thread to the given core. Linux-only; on other OSes this
   /// is a no-op so the rest of the system still runs (just without affinity).
@@ -23,6 +28,26 @@ namespace Common {
         return pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset) == 0;
     #else
         (void)core_id;
+        return true;
+    #endif
+  }
+
+  /// Apply a Darwin THREAD_AFFINITY_POLICY hint to the current thread.
+  /// IMPORTANT: This is a *hint*, not a hard pin. Threads sharing the same
+  /// non-zero affinity_tag are *likely* to be co-located on a core that
+  /// shares L2 cache; the kernel may still migrate. On non-Darwin platforms
+  /// this is a no-op. On Linux, use setThreadCore() for a real pin.
+  inline auto pinCurrentThreadDarwinHint(int affinity_tag) noexcept -> bool {
+    #if defined(__APPLE__)
+        thread_affinity_policy_data_t policy{ affinity_tag };
+        const thread_port_t mach_thread = pthread_mach_thread_np(pthread_self());
+        const auto kr = thread_policy_set(
+            mach_thread, THREAD_AFFINITY_POLICY,
+            reinterpret_cast<thread_policy_t>(&policy),
+            THREAD_AFFINITY_POLICY_COUNT);
+        return kr == KERN_SUCCESS;
+    #else
+        (void)affinity_tag;
         return true;
     #endif
   }

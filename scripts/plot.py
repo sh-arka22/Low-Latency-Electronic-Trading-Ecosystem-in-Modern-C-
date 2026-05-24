@@ -153,14 +153,66 @@ def cmd_pnl() -> None:
     print(f"wrote {out}")
 
 
+def cmd_jitter() -> None:
+    """Render pinned vs unpinned rdtsc-loop jitter histograms.
+
+    Looks for docs/jitter_pinned.hgrm and docs/jitter_unpinned.hgrm.
+    """
+    cwd = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    pinned   = os.path.join(cwd, "docs", "jitter_pinned.hgrm")
+    unpinned = os.path.join(cwd, "docs", "jitter_unpinned.hgrm")
+    if not (os.path.exists(pinned) and os.path.exists(unpinned)):
+        sys.stderr.write(
+            "expected docs/jitter_{pinned,unpinned}.hgrm — run "
+            "./cmake-build-release/jitter_benchmark first\n")
+        sys.exit(1)
+    hp = parse_hgrm(pinned)
+    hu = parse_hgrm(unpinned)
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    for label, h, color in [
+        ("unpinned", hu, "#dd8452"),
+        ("pinned (Darwin affinity hint)", hp, "#4c72b0"),
+    ]:
+        if not h["buckets"]:
+            continue
+        # Use bucket midpoints (log scale) on x, counts on y, log y
+        xs = [(lo + hi) / 2.0 for lo, hi, _ in h["buckets"]]
+        ys = [c for _, _, c in h["buckets"]]
+        ax.step(xs, ys, where="mid", label=label, color=color, linewidth=1.6)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("rdtsc-to-rdtsc cycle delta (log scale)")
+    ax.set_ylabel("samples (log scale)")
+    ax.set_title("Tight-loop scheduler jitter — Darwin affinity hint")
+    ax.legend()
+    ax.grid(alpha=0.3, which="both")
+
+    # Annotate the tail percentiles in the corner.
+    annot = (
+        f"unpinned  p99={hu['p99']}  p9999={hu['p9999']}  max={hu['max']}\n"
+        f"pinned    p99={hp['p99']}  p9999={hp['p9999']}  max={hp['max']}"
+    )
+    ax.text(0.98, 0.97, annot, transform=ax.transAxes, ha="right", va="top",
+            family="monospace", fontsize=9,
+            bbox=dict(boxstyle="round", fc="white", ec="0.7", alpha=0.9))
+
+    fig.tight_layout()
+    out = os.path.join(DOCS_DIR, "jitter.png")
+    fig.savefig(out, dpi=140)
+    print(f"wrote {out}")
+
+
 def main() -> int:
-    if len(sys.argv) < 2 or sys.argv[1] not in ("latency", "pnl"):
+    if len(sys.argv) < 2 or sys.argv[1] not in ("latency", "pnl", "jitter"):
         sys.stderr.write(__doc__)
         return 2
     if sys.argv[1] == "latency":
         cmd_latency()
-    else:
+    elif sys.argv[1] == "pnl":
         cmd_pnl()
+    else:
+        cmd_jitter()
     return 0
 
 
