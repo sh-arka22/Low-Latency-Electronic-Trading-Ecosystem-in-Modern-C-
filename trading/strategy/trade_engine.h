@@ -1,7 +1,5 @@
 #pragma once
 
-#include <functional>
-
 #include "common/thread_utils.h"
 #include "common/time_utils.h"
 #include "common/lf_queue.h"
@@ -73,13 +71,12 @@ namespace Trading {
     auto volatility() const noexcept { return feature_engine_.getVolatility(); }
     auto ofi()        const noexcept { return feature_engine_.getOFI();         }
 
-    // Public so MarketMaker / LiquidityTaker constructors can overwrite them.
-    std::function<void(TickerId, Price, Side, MarketOrderBook *)>
-        algoOnOrderBookUpdate_;
-    std::function<void(const Exchange::MEMarketUpdate *, MarketOrderBook *)>
-        algoOnTradeUpdate_;
-    std::function<void(const Exchange::MEClientResponse *)>
-        algoOnOrderUpdate_;
+    // Day 4 — std::function<> dispatch dropped. TradeEngine now holds direct
+    // pointers to MarketMaker / LiquidityTaker (see private section below) and
+    // dispatches via a branch on which one is non-null. The branch is fully
+    // predictable (the chosen algo is fixed at construction), and the call is
+    // direct so the compiler inlines through it. No more heap-allocated
+    // lambda objects, no more vtable-style indirection in the hot path.
 
     TradeEngine()                                = delete;
     TradeEngine(const TradeEngine &)             = delete;
@@ -126,11 +123,24 @@ namespace Trading {
     /// Dump every histogram to ./latency_<tag>.hgrm. Called from ~TradeEngine.
     auto dumpLatencyHistograms() const noexcept -> void;
 
-    auto defaultAlgoOnOrderBookUpdate(TickerId ticker_id, Price price,
-                                      Side side, MarketOrderBook *) noexcept -> void;
-    auto defaultAlgoOnTradeUpdate(const Exchange::MEMarketUpdate *market_update,
-                                  MarketOrderBook *) noexcept -> void;
-    auto defaultAlgoOnOrderUpdate(const Exchange::MEClientResponse *client_response)
-        noexcept -> void;
+    // Day 4 — algo dispatch helpers. These get inlined; the if/else is
+    // branch-predictable (taken consistently for the whole session) so the
+    // expected cost is ~1 cycle vs ~5-15 cycles for the std::function call
+    // they replaced, plus we drop a heap allocation.
+    inline auto dispatchOnOrderBookUpdate(TickerId t, Price p, Side s,
+                                          MarketOrderBook *b) noexcept -> void {
+      if (mm_algo_)         mm_algo_->onOrderBookUpdate(t, p, s, b);
+      else if (taker_algo_) taker_algo_->onOrderBookUpdate(t, p, s, b);
+    }
+    inline auto dispatchOnTradeUpdate(const Exchange::MEMarketUpdate *u,
+                                      MarketOrderBook *b) noexcept -> void {
+      if (mm_algo_)         mm_algo_->onTradeUpdate(u, b);
+      else if (taker_algo_) taker_algo_->onTradeUpdate(u, b);
+    }
+    inline auto dispatchOnOrderUpdate(const Exchange::MEClientResponse *r) noexcept -> void {
+      if (mm_algo_)         mm_algo_->onOrderUpdate(r);
+      else if (taker_algo_) taker_algo_->onOrderUpdate(r);
+    }
+
   };
 }

@@ -4,7 +4,7 @@
 namespace Trading {
 
   LiquidityTaker::LiquidityTaker(Common::Logger *logger,
-                                  TradeEngine *trade_engine,
+                                  TradeEngine * /*trade_engine*/,
                                   FeatureEngine *feature_engine,
                                   OrderManager *order_manager,
                                   const TradeEngineCfgHashMap &ticker_cfg)
@@ -12,19 +12,9 @@ namespace Trading {
         order_manager_(order_manager),
         logger_(logger),
         ticker_cfg_(ticker_cfg) {
-
-    trade_engine->algoOnOrderBookUpdate_ =
-        [this](auto ticker_id, auto price, auto side, auto book) {
-          onOrderBookUpdate(ticker_id, price, side, book);
-        };
-    trade_engine->algoOnTradeUpdate_ =
-        [this](auto market_update, auto book) {
-          onTradeUpdate(market_update, book);
-        };
-    trade_engine->algoOnOrderUpdate_ =
-        [this](auto client_response) {
-          onOrderUpdate(client_response);
-        };
+    // Day 4 — algoOn*_ std::function writes removed. TradeEngine now holds the
+    // taker_algo_ pointer to this instance and calls our on*Update methods
+    // directly via inlined dispatch helpers (see trade_engine.h).
   }
 
   auto LiquidityTaker::onTradeUpdate(const Exchange::MEMarketUpdate *market_update,

@@ -23,16 +23,9 @@ namespace Trading {
       ticker_order_book_[i]->setTradeEngine(this);
     }
 
-    algoOnOrderBookUpdate_ = [this](auto ticker_id, auto price,
-                                     auto side, auto book) {
-      defaultAlgoOnOrderBookUpdate(ticker_id, price, side, book);
-    };
-    algoOnTradeUpdate_ = [this](auto market_update, auto book) {
-      defaultAlgoOnTradeUpdate(market_update, book);
-    };
-    algoOnOrderUpdate_ = [this](auto client_response) {
-      defaultAlgoOnOrderUpdate(client_response);
-    };
+    // Day 4 — no more std::function lambda assignments. mm_algo_/taker_algo_
+    // stay null until one of the branches below sets them. If neither is set
+    // (e.g. RANDOM mode), the dispatch helpers in trade_engine.h are no-ops.
 
     // Push per-ticker hysteresis tolerances into OrderManager before any algo
     // construction so the algo callbacks see the right requote behaviour.
@@ -174,7 +167,7 @@ namespace Trading {
     END_MEASURE_HIST(Trading_FeatureEngine_onOrderBookUpdate, logger_, hist_fe_obUpdate_);
 
     START_MEASURE(Trading_TradeEngine_algoOnOrderBookUpdate_);
-    algoOnOrderBookUpdate_(ticker_id, price, side, book);
+    dispatchOnOrderBookUpdate(ticker_id, price, side, book);
     END_MEASURE_HIST(Trading_TradeEngine_algoOnOrderBookUpdate_, logger_, hist_algo_obUpdate_);
   }
 
@@ -189,7 +182,7 @@ namespace Trading {
     END_MEASURE_HIST(Trading_FeatureEngine_onTradeUpdate, logger_, hist_fe_trUpdate_);
 
     START_MEASURE(Trading_TradeEngine_algoOnTradeUpdate_);
-    algoOnTradeUpdate_(market_update, book);
+    dispatchOnTradeUpdate(market_update, book);
     END_MEASURE_HIST(Trading_TradeEngine_algoOnTradeUpdate_, logger_, hist_algo_trUpdate_);
   }
 
@@ -206,34 +199,12 @@ namespace Trading {
     }
 
     START_MEASURE(Trading_TradeEngine_algoOnOrderUpdate_);
-    algoOnOrderUpdate_(client_response);
+    dispatchOnOrderUpdate(client_response);
     END_MEASURE_HIST(Trading_TradeEngine_algoOnOrderUpdate_, logger_, hist_algo_ordUpdate_);
   }
 
-  auto TradeEngine::defaultAlgoOnOrderBookUpdate(TickerId ticker_id, Price price,
-                                                  Side side, MarketOrderBook *)
-      noexcept -> void {
-    logger_.log("%:% %() % ticker:% price:% side:%\n",
-                __FILE__, __LINE__, __FUNCTION__,
-                Common::getCurrentTimeStr(&time_str_),
-                ticker_id, Common::priceToString(price).c_str(),
-                Common::sideToString(side).c_str());
-  }
-
-  auto TradeEngine::defaultAlgoOnTradeUpdate(
-      const Exchange::MEMarketUpdate *market_update, MarketOrderBook *)
-      noexcept -> void {
-    logger_.log("%:% %() % %\n", __FILE__, __LINE__, __FUNCTION__,
-                Common::getCurrentTimeStr(&time_str_),
-                market_update->toString().c_str());
-  }
-
-  auto TradeEngine::defaultAlgoOnOrderUpdate(
-      const Exchange::MEClientResponse *client_response) noexcept -> void {
-    logger_.log("%:% %() % %\n", __FILE__, __LINE__, __FUNCTION__,
-                Common::getCurrentTimeStr(&time_str_),
-                client_response->toString().c_str());
-  }
+  // Day 4 — defaultAlgo* removed. Dispatch now branches on mm_algo_/taker_algo_
+  // directly; the RANDOM case has both null and falls through to a no-op.
 
   // ---------------------------------------------------------------------------
   // Day 1 — dump every per-tag latency histogram to ./latency_<client_id>_<tag>.hgrm

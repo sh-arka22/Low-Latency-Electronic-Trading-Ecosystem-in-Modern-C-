@@ -7,7 +7,7 @@
 namespace Trading {
 
   MarketMaker::MarketMaker(Common::Logger *logger,
-                           TradeEngine *trade_engine,
+                           TradeEngine * /*trade_engine*/,
                            const FeatureEngine *feature_engine,
                            const PositionKeeper *position_keeper,
                            OrderManager *order_manager,
@@ -18,19 +18,9 @@ namespace Trading {
         logger_(logger),
         ticker_cfg_(ticker_cfg),
         session_start_ns_(Common::getCurrentNanos()) {
-
-    trade_engine->algoOnOrderBookUpdate_ =
-        [this](auto ticker_id, auto price, auto side, auto book) {
-          onOrderBookUpdate(ticker_id, price, side, book);
-        };
-    trade_engine->algoOnTradeUpdate_ =
-        [this](auto market_update, auto book) {
-          onTradeUpdate(market_update, book);
-        };
-    trade_engine->algoOnOrderUpdate_ =
-        [this](auto client_response) {
-          onOrderUpdate(client_response);
-        };
+    // Day 4 — algoOn*_ std::function writes removed. TradeEngine now holds the
+    // mm_algo_ pointer to this instance and calls our on*Update methods directly
+    // via inlined dispatch helpers (see trade_engine.h).
   }
 
   auto MarketMaker::onOrderBookUpdate(TickerId ticker_id, Price price,
