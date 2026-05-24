@@ -85,7 +85,11 @@ namespace Trading {
 
   private:
     std::string  time_str_;
-    Common::Logger *logger_ = nullptr;
+    // Held for future logging hooks (e.g. logging the RiskCheckResult on
+    // rejection). Currently no log call site uses it; suppress the unused
+    // warning explicitly rather than removing it, so adding a log line later
+    // stays a one-liner.
+    [[maybe_unused]] Common::Logger *logger_ = nullptr;
     TickerRiskInfoHashMap ticker_risk_;
   };
 }
