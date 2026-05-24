@@ -21,6 +21,17 @@ namespace Common {
         LOGGER.log("% RDTSC " #TAG " %\n", Common::getCurrentTimeStr(&time_str_), (end - TAG)); \
       } while (false)
 
+/// Same as END_MEASURE but also records the cycle delta into a
+/// Common::LatencyHistogram. One rdtsc() shared between the log and the
+/// histogram, so this is the same cost as END_MEASURE plus one record.
+#define END_MEASURE_HIST(TAG, LOGGER, HIST)                                                     \
+      do {                                                                                      \
+        const auto end = Common::rdtsc();                                                       \
+        const auto delta = (end - TAG);                                                         \
+        LOGGER.log("% RDTSC " #TAG " %\n", Common::getCurrentTimeStr(&time_str_), delta);       \
+        (HIST).record(static_cast<int64_t>(delta));                                             \
+      } while (false)
+
 /// Log a current wall-clock nanosecond timestamp at the call site.
 #define TTT_MEASURE(TAG, LOGGER)                                                                \
       do {                                                                                      \

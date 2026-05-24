@@ -22,6 +22,11 @@ _deps/
 *.log
 stderr.txt
 
+# Latency histograms dumped by TradeEngine at shutdown (Day 1, regeneratable
+# via scripts/run_demo.sh). The rendered plot in docs/latency.png is tracked;
+# the raw .hgrm data is not.
+latency_*.hgrm
+
 # macOS metadata
 .DS_Store
 ._*

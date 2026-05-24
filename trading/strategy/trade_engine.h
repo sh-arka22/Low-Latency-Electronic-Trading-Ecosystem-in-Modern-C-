@@ -7,6 +7,7 @@
 #include "common/lf_queue.h"
 #include "common/macros.h"
 #include "common/logging.h"
+#include "common/latency_histogram.h"
 
 #include "exchange/order_server/client_request.h"
 #include "exchange/order_server/client_response.h"
@@ -110,7 +111,20 @@ namespace Trading {
     MarketMaker    *mm_algo_    = nullptr;
     LiquidityTaker *taker_algo_ = nullptr;
 
+    // Per-tag latency histograms. Single-writer (this TradeEngine thread),
+    // so no atomics. Dumped to *.hgrm files in the destructor (Day 1).
+    Common::LatencyHistogram hist_pk_updateBBO_   {"Trading_PositionKeeper_updateBBO"};
+    Common::LatencyHistogram hist_fe_obUpdate_    {"Trading_FeatureEngine_onOrderBookUpdate"};
+    Common::LatencyHistogram hist_algo_obUpdate_  {"Trading_TradeEngine_algoOnOrderBookUpdate_"};
+    Common::LatencyHistogram hist_fe_trUpdate_    {"Trading_FeatureEngine_onTradeUpdate"};
+    Common::LatencyHistogram hist_algo_trUpdate_  {"Trading_TradeEngine_algoOnTradeUpdate_"};
+    Common::LatencyHistogram hist_pk_addFill_     {"Trading_PositionKeeper_addFill"};
+    Common::LatencyHistogram hist_algo_ordUpdate_ {"Trading_TradeEngine_algoOnOrderUpdate_"};
+
     auto run() noexcept -> void;
+
+    /// Dump every histogram to ./latency_<tag>.hgrm. Called from ~TradeEngine.
+    auto dumpLatencyHistograms() const noexcept -> void;
 
     auto defaultAlgoOnOrderBookUpdate(TickerId ticker_id, Price price,
                                       Side side, MarketOrderBook *) noexcept -> void;

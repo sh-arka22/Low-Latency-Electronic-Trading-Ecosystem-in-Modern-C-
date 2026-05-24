@@ -1,0 +1,15 @@
+tag,count,p50_ns,p99_ns,p999_ns,p9999_ns
+Trading_TradeEngine_algoOnOrderBookUpdate_,877,31353.8,192804.6,352886.2,352886.2
+Trading_TradeEngine_algoOnOrderUpdate_,467,39999.6,126030.8,403298.5,403298.5
+Trading_PositionKeeper_addFill,266,20983.8,50412.3,84020.4,84020.4
+Trading_PositionKeeper_addFill,26,22240.4,47611.5,47611.5,47611.5
+Trading_TradeEngine_algoOnOrderUpdate_,813,10091.5,35288.5,48731.5,48731.5
+Trading_FeatureEngine_onOrderBookUpdate,877,9265.0,27726.5,47891.5,47891.5
+Trading_FeatureEngine_onTradeUpdate,146,9813.1,25206.2,50412.3,50412.3
+Trading_PositionKeeper_updateBBO,877,70.8,24985.0,100824.6,100824.6
+Trading_FeatureEngine_onOrderBookUpdate,877,9356.5,24575.8,100824.6,100824.6
+Trading_TradeEngine_algoOnOrderBookUpdate_,877,8742.7,24180.0,50412.3,50412.3
+Trading_PositionKeeper_updateBBO,877,95.4,24173.1,44110.8,44110.8
+Trading_FeatureEngine_onTradeUpdate,146,9634.6,23405.4,25206.2,25206.2
+Trading_TradeEngine_algoOnTradeUpdate_,146,9634.6,23405.4,25206.2,25206.2
+Trading_TradeEngine_algoOnTradeUpdate_,146,9540.8,18904.6,22055.4,22055.4

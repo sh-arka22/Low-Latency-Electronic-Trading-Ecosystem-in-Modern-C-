@@ -63,6 +63,10 @@ namespace Trading {
     using namespace std::literals::chrono_literals;
     std::this_thread::sleep_for(1s);
 
+    // Day 1 — dump per-tag latency histograms before destroying anything else.
+    // Safe to call here: run() thread has exited (run_ = false + 1s sleep).
+    dumpLatencyHistograms();
+
     delete mm_algo_;    mm_algo_    = nullptr;
     delete taker_algo_; taker_algo_ = nullptr;
 
@@ -163,15 +167,15 @@ namespace Trading {
 
     START_MEASURE(Trading_PositionKeeper_updateBBO);
     position_keeper_.updateBBO(ticker_id, bbo);
-    END_MEASURE(Trading_PositionKeeper_updateBBO, logger_);
+    END_MEASURE_HIST(Trading_PositionKeeper_updateBBO, logger_, hist_pk_updateBBO_);
 
     START_MEASURE(Trading_FeatureEngine_onOrderBookUpdate);
     feature_engine_.onOrderBookUpdate(ticker_id, price, side, book);
-    END_MEASURE(Trading_FeatureEngine_onOrderBookUpdate, logger_);
+    END_MEASURE_HIST(Trading_FeatureEngine_onOrderBookUpdate, logger_, hist_fe_obUpdate_);
 
     START_MEASURE(Trading_TradeEngine_algoOnOrderBookUpdate_);
     algoOnOrderBookUpdate_(ticker_id, price, side, book);
-    END_MEASURE(Trading_TradeEngine_algoOnOrderBookUpdate_, logger_);
+    END_MEASURE_HIST(Trading_TradeEngine_algoOnOrderBookUpdate_, logger_, hist_algo_obUpdate_);
   }
 
   auto TradeEngine::onTradeUpdate(const Exchange::MEMarketUpdate *market_update,
@@ -182,11 +186,11 @@ namespace Trading {
 
     START_MEASURE(Trading_FeatureEngine_onTradeUpdate);
     feature_engine_.onTradeUpdate(market_update, book);
-    END_MEASURE(Trading_FeatureEngine_onTradeUpdate, logger_);
+    END_MEASURE_HIST(Trading_FeatureEngine_onTradeUpdate, logger_, hist_fe_trUpdate_);
 
     START_MEASURE(Trading_TradeEngine_algoOnTradeUpdate_);
     algoOnTradeUpdate_(market_update, book);
-    END_MEASURE(Trading_TradeEngine_algoOnTradeUpdate_, logger_);
+    END_MEASURE_HIST(Trading_TradeEngine_algoOnTradeUpdate_, logger_, hist_algo_trUpdate_);
   }
 
   auto TradeEngine::onOrderUpdate(const Exchange::MEClientResponse *client_response)
@@ -198,12 +202,12 @@ namespace Trading {
     if (UNLIKELY(client_response->type_ == Exchange::ClientResponseType::FILLED)) {
       START_MEASURE(Trading_PositionKeeper_addFill);
       position_keeper_.addFill(client_response);
-      END_MEASURE(Trading_PositionKeeper_addFill, logger_);
+      END_MEASURE_HIST(Trading_PositionKeeper_addFill, logger_, hist_pk_addFill_);
     }
 
     START_MEASURE(Trading_TradeEngine_algoOnOrderUpdate_);
     algoOnOrderUpdate_(client_response);
-    END_MEASURE(Trading_TradeEngine_algoOnOrderUpdate_, logger_);
+    END_MEASURE_HIST(Trading_TradeEngine_algoOnOrderUpdate_, logger_, hist_algo_ordUpdate_);
   }
 
   auto TradeEngine::defaultAlgoOnOrderBookUpdate(TickerId ticker_id, Price price,
@@ -229,6 +233,24 @@ namespace Trading {
     logger_.log("%:% %() % %\n", __FILE__, __LINE__, __FUNCTION__,
                 Common::getCurrentTimeStr(&time_str_),
                 client_response->toString().c_str());
+  }
+
+  // ---------------------------------------------------------------------------
+  // Day 1 — dump every per-tag latency histogram to ./latency_<client_id>_<tag>.hgrm
+  // Filename includes client_id to avoid two trading_main instances clobbering
+  // each other's files.
+  // ---------------------------------------------------------------------------
+  auto TradeEngine::dumpLatencyHistograms() const noexcept -> void {
+    const Common::LatencyHistogram *const hists[] = {
+        &hist_pk_updateBBO_,   &hist_fe_obUpdate_,   &hist_algo_obUpdate_,
+        &hist_fe_trUpdate_,    &hist_algo_trUpdate_,
+        &hist_pk_addFill_,     &hist_algo_ordUpdate_,
+    };
+    const auto prefix = "latency_" + std::to_string(client_id_) + "_";
+    for (const auto *h : hists) {
+      const auto path = prefix + h->name() + ".hgrm";
+      h->dumpCsv(path);
+    }
   }
 
 } // namespace Trading
