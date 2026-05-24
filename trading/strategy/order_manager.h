@@ -1,5 +1,8 @@
 #pragma once
 
+#include <array>
+#include <cstdlib>
+
 #include "common/macros.h"
 #include "common/logging.h"
 #include "common/types.h"
@@ -60,11 +63,20 @@ namespace Trading {
 
     auto cancelOrder(OMOrder *order) noexcept -> void;
 
+    auto setHysteresisTicks(TickerId ticker_id, Price hysteresis_ticks) noexcept {
+      hysteresis_ticks_.at(ticker_id) = hysteresis_ticks;
+    }
+
     auto moveOrder(OMOrder *order, TickerId ticker_id, Price price,
                    Side side, Qty qty) noexcept {
       switch (order->order_state_) {
         case OMOrderState::LIVE: {
-          if (order->price_ != price) {
+          // Hysteresis dead-zone: keep queue position if price within tolerance.
+          const auto delta = price == Price_INVALID
+                             ? Price_INVALID
+                             : std::abs(order->price_ - price);
+          const auto tol   = hysteresis_ticks_.at(ticker_id);
+          if (delta > tol) {
             START_MEASURE(Trading_OrderManager_cancelOrder);
             cancelOrder(order);
             END_MEASURE(Trading_OrderManager_cancelOrder, (*logger_));
@@ -135,5 +147,6 @@ namespace Trading {
     Common::Logger     *logger_        = nullptr;
     OMOrderTickerSideHashMap ticker_side_order_;
     OrderId             next_order_id_ = 1;
+    std::array<Price, ME_MAX_TICKERS> hysteresis_ticks_ {};  // zero-initialised
   };
 }

@@ -43,7 +43,12 @@ int main(int argc, char **argv) {
   if (argc < 3) {
     fprintf(stderr,
             "Usage: %s CLIENT_ID ALGO_TYPE "
-            "[clip threshold max_order_size max_position max_loss] * ME_MAX_TICKERS\n",
+            "[clip threshold max_order_size max_position max_loss "
+            "use_as gamma kappa session_hours use_ofi beta_ofi hyst_ticks "
+            "use_adaptive_clip sigma_ref] * ME_MAX_TICKERS\n"
+            "  v1.0 compat: 5 fields per ticker (clip..max_loss). v1.1 AS+OFI:\n"
+            "  append 8 more (use_as gamma kappa session_hours use_ofi beta_ofi\n"
+            "  hyst_ticks use_adaptive_clip sigma_ref) for full inventory-aware mode.\n",
             argv[0]);
     return EXIT_FAILURE;
   }
@@ -54,17 +59,38 @@ int main(int argc, char **argv) {
   srand(client_id);
   const auto algo_type = stringToAlgoType(argv[2]);
 
+  // v1.0 path = 5 fields per ticker. v1.1 path appends 9 more fields, so the
+  // per-ticker stride is either 5 or 14. Detect from how many args were given.
+  const int kCfgArgs   = argc - 3;
+  const int kV11Stride = 14;
+  const int kV10Stride = 5;
+  const int stride = (kCfgArgs > 0 && kCfgArgs % kV11Stride == 0)
+                   ? kV11Stride : kV10Stride;
+
   TradeEngineCfgHashMap ticker_cfg;
   size_t next_ticker_id = 0;
   for (int i = 3; i < argc && next_ticker_id < ME_MAX_TICKERS;
-       i += 5, ++next_ticker_id) {
-    ticker_cfg.at(next_ticker_id) = {
-        static_cast<Qty>(std::atoi(argv[i])),               // clip
-        std::atof(argv[i + 1]),                             // threshold
-        { static_cast<Qty>(std::atoi(argv[i + 2])),         // max_order_size
-          static_cast<Qty>(std::atoi(argv[i + 3])),         // max_position
-          std::atof(argv[i + 4]) }                          // max_loss
+       i += stride, ++next_ticker_id) {
+    TradeEngineCfg cfg{};
+    cfg.clip_      = static_cast<Qty>(std::atoi(argv[i]));
+    cfg.threshold_ = std::atof(argv[i + 1]);
+    cfg.risk_cfg_  = {
+        static_cast<Qty>(std::atoi(argv[i + 2])),
+        static_cast<Qty>(std::atoi(argv[i + 3])),
+        std::atof(argv[i + 4])
     };
+    if (stride == kV11Stride) {
+      cfg.use_as_            = std::atoi(argv[i + 5]) != 0;
+      cfg.gamma_             = std::atof(argv[i + 6]);
+      cfg.kappa_             = std::atof(argv[i + 7]);
+      cfg.session_hours_     = std::atof(argv[i + 8]);
+      cfg.use_ofi_           = std::atoi(argv[i + 9]) != 0;
+      cfg.beta_ofi_          = std::atof(argv[i + 10]);
+      cfg.hysteresis_ticks_  = static_cast<Price>(std::atoi(argv[i + 11]));
+      cfg.use_adaptive_clip_ = std::atoi(argv[i + 12]) != 0;
+      cfg.sigma_ref_         = std::atof(argv[i + 13]);
+    }
+    ticker_cfg.at(next_ticker_id) = cfg;
   }
 
   logger = new Common::Logger("trading_main_" + std::to_string(client_id) + ".log");

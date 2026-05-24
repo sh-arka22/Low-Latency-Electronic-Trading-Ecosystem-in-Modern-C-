@@ -11,9 +11,11 @@ add_subdirectory(common)
 add_subdirectory(exchange)
 add_subdirectory(trading)
 
-list(APPEND LIBS libcommon)
-list(APPEND LIBS libexchange)
+# Link order matters for GNU ld (Linux): consumers must precede providers.
+# Apple ld is order-insensitive so the v1.0 ordering worked on macOS but not Linux.
 list(APPEND LIBS libtrading)
+list(APPEND LIBS libexchange)
+list(APPEND LIBS libcommon)
 list(APPEND LIBS pthread)
 
 include_directories(${PROJECT_SOURCE_DIR})

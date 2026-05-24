@@ -34,8 +34,15 @@ namespace Trading {
       defaultAlgoOnOrderUpdate(client_response);
     };
 
+    // Push per-ticker hysteresis tolerances into OrderManager before any algo
+    // construction so the algo callbacks see the right requote behaviour.
+    for (TickerId i = 0; i < ticker_cfg.size(); ++i) {
+      order_manager_.setHysteresisTicks(i, ticker_cfg.at(i).hysteresis_ticks_);
+    }
+
     if (algo_type == AlgoType::MAKER) {
       mm_algo_ = new MarketMaker(&logger_, this, &feature_engine_,
+                                 &position_keeper_,
                                  &order_manager_, ticker_cfg);
     } else if (algo_type == AlgoType::TAKER) {
       taker_algo_ = new LiquidityTaker(&logger_, this, &feature_engine_,

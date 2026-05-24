@@ -113,11 +113,32 @@ namespace Common {
     double threshold_ = 0;
     RiskCfg risk_cfg_;
 
+    // v1.1 — Avellaneda-Stoikov + OFI + queue hysteresis + adaptive clip.
+    // Defaults preserve the v1.0 threshold-pennying behaviour (use_as_=false).
+    bool   use_as_           = false;
+    double gamma_            = 0.1;    // risk aversion (AS)
+    double kappa_            = 1.5;    // order arrival intensity (AS)
+    double session_hours_    = 6.5;    // trading session length, for τ
+    bool   use_ofi_          = false;
+    double beta_ofi_         = 0.0;    // OFI loading into reservation price
+    Price  hysteresis_ticks_ = 0;      // OrderManager requote dead-zone
+    bool   use_adaptive_clip_ = false;
+    double sigma_ref_        = 1.0;    // reference σ used in adaptive_clip scale
+
     auto toString() const {
       std::stringstream ss;
       ss << "TradeEngineCfg{"
          << "clip:"   << qtyToString(clip_) << " "
          << "thresh:" << threshold_         << " "
+         << "as:"     << (use_as_  ? "1" : "0") << " "
+         << "γ:"      << gamma_   << " "
+         << "κ:"      << kappa_   << " "
+         << "T:"      << session_hours_ << " "
+         << "ofi:"    << (use_ofi_ ? "1" : "0") << " "
+         << "β:"      << beta_ofi_ << " "
+         << "hyst:"   << hysteresis_ticks_ << " "
+         << "aclip:"  << (use_adaptive_clip_ ? "1" : "0") << " "
+         << "σ_ref:"  << sigma_ref_ << " "
          << "risk:"   << risk_cfg_.toString()
          << "}";
       return ss.str();
