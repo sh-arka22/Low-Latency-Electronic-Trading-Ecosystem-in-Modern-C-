@@ -51,6 +51,27 @@ namespace Trading {
                                        / NANOS_TO_SECS; }
     auto clientId() const    { return client_id_; }
 
+    // ---- v1.1 backtest harness accessors -------------------------------
+    // Used by Backtest::BacktestEngine to drive the engine synchronously
+    // without starting its internal run() thread.
+    auto orderBook(TickerId ticker_id) const noexcept {
+      return ticker_order_book_.at(ticker_id);
+    }
+    struct PositionSnapshot {
+      int32_t position;
+      double  real_pnl;
+      double  unreal_pnl;
+      double  total_pnl;
+      Qty     volume;
+    };
+    auto positionInfo(TickerId ticker_id) const noexcept -> PositionSnapshot {
+      const auto *pi = position_keeper_.getPositionInfo(ticker_id);
+      return {pi->position_, pi->real_pnl_, pi->unreal_pnl_,
+              pi->total_pnl_, pi->volume_};
+    }
+    auto volatility() const noexcept { return feature_engine_.getVolatility(); }
+    auto ofi()        const noexcept { return feature_engine_.getOFI();         }
+
     // Public so MarketMaker / LiquidityTaker constructors can overwrite them.
     std::function<void(TickerId, Price, Side, MarketOrderBook *)>
         algoOnOrderBookUpdate_;

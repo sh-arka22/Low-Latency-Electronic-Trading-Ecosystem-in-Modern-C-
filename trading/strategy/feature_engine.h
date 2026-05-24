@@ -29,8 +29,12 @@ namespace Trading {
                      / static_cast<double>(bbo->bid_qty_ + bbo->ask_qty_);
 
         // ----- EWMA realised volatility on mid-price returns ---------------
+        // NB: prev_mid_'s sentinel is NaN, and `NaN != NaN` is true in IEEE
+        // 754 — direct inequality with Feature_INVALID would *enter* the
+        // branch on the first event, compute ret = mid - NaN = NaN, and
+        // poison ewma_variance_ permanently. Use isnan() instead.
         const auto mid = 0.5 * (bbo->bid_price_ + bbo->ask_price_);
-        if (prev_mid_ != Feature_INVALID) {
+        if (!std::isnan(prev_mid_)) {
           const auto ret = mid - prev_mid_;
           ewma_variance_ = kEwmaDecay * ewma_variance_
                          + (1.0 - kEwmaDecay) * ret * ret;

@@ -10,9 +10,11 @@ set(CMAKE_VERBOSE_MAKEFILE on)
 add_subdirectory(common)
 add_subdirectory(exchange)
 add_subdirectory(trading)
+add_subdirectory(backtest)
 
 # Link order matters for GNU ld (Linux): consumers must precede providers.
 # Apple ld is order-insensitive so the v1.0 ordering worked on macOS but not Linux.
+list(APPEND LIBS libbacktest)
 list(APPEND LIBS libtrading)
 list(APPEND LIBS libexchange)
 list(APPEND LIBS libcommon)
@@ -27,6 +29,10 @@ target_link_libraries(exchange_main PUBLIC ${LIBS})
 
 add_executable(trading_main trading/trading_main.cpp)
 target_link_libraries(trading_main PUBLIC ${LIBS})
+
+# v1.1 — backtest harness: drives the same MarketMaker against a replayed tape.
+add_executable(backtest_main backtest/backtest_main.cpp)
+target_link_libraries(backtest_main PUBLIC ${LIBS})
 
 # ── Chapter 12 benchmarks ───────────────────────────────────────────────────
 add_executable(logger_benchmark  benchmarks/logger_benchmark.cpp)

@@ -27,11 +27,17 @@ namespace Trading {
   auto MarketOrderBook::onMarketUpdate(const Exchange::MEMarketUpdate *market_update) noexcept -> void {
     // Decide up-front whether this event can affect the best price level on
     // either side. We need this before mutating the book.
-    const auto bid_updated = (bids_by_price_ &&
-                              market_update->side_ == Side::BUY &&
+    //
+    // v1.1 fix: the original predicate "bids_by_price_ && price >= best.price"
+    // was false on the *first* ADD because bids_by_price_ was still null —
+    // updateBBO then skipped and the BBO stayed at Price_INVALID forever,
+    // so any strategy keying off BBO never quoted. Treat an empty side as
+    // an implicit BBO change for any ADD on that side.
+    const auto bid_updated = market_update->side_ == Side::BUY &&
+                             (bids_by_price_ == nullptr ||
                               market_update->price_ >= bids_by_price_->price_);
-    const auto ask_updated = (asks_by_price_ &&
-                              market_update->side_ == Side::SELL &&
+    const auto ask_updated = market_update->side_ == Side::SELL &&
+                             (asks_by_price_ == nullptr ||
                               market_update->price_ <= asks_by_price_->price_);
 
     switch (market_update->type_) {
