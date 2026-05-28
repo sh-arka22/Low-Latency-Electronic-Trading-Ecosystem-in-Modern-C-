@@ -197,14 +197,16 @@ namespace Backtest {
         slot.side       = side;
         slot.leaves     = req->qty_;
         slot.created_ns = now_ns;
-        // queue ahead estimate: depth currently at our price level (assume we
-        // join the back of the visible queue at top-of-book).
-        // Optimistic queue model: assume we get to the front of the queue at
-        // insert time. This makes fills sensitive primarily to *how long* the
-        // order stays live (i.e. hysteresis vs requote-every-tick) which is
-        // the dominant variable we're trying to compare across strategies.
-        slot.ahead = 0;
-        (void)last_bid_qty_; (void)last_ask_qty_;
+        // Queue-position estimate: if we join the touch, sit BEHIND the
+        // displayed depth and wait for it to trade through. If we improve
+        // (better than touch), we're alone at this price level. The trade-
+        // burns-queue path in matchAgainstTrade() decrements `ahead` as
+        // prints arrive on our side, so this is the only seed point.
+        if (side == Side::BUY) {
+          slot.ahead = (req->price_ == last_bid_price_) ? last_bid_qty_ : 0;
+        } else {
+          slot.ahead = (req->price_ == last_ask_price_) ? last_ask_qty_ : 0;
+        }
         ++num_requotes_;
         rsp.type_ = Exchange::ClientResponseType::ACCEPTED;
       } else {
@@ -237,9 +239,28 @@ namespace Backtest {
     auto       &bid_slot = live_.at(tid).at(sideToIndex(Side::BUY));
     auto       &ask_slot = live_.at(tid).at(sideToIndex(Side::SELL));
 
-    if (bid_slot.leaves > 0
-        && last_ask_price_ != Common::Price_INVALID
-        && bid_slot.price >= last_ask_price_) {
+    // Helper: when the touch sweeps through our quote, we get a fill only
+    // if we were at the FRONT of the queue (ahead == 0). Otherwise the
+    // aggressor consumed the size in front of us — a real maker would have
+    // been pulled by their own logic or blown past without execution. Phantom
+    // fills here are the dominant adverse-selection leak (price moving
+    // against us = mechanical fill at the new touch).
+    auto sweepBid = [&]() {
+      if (bid_slot.ahead > 0) {
+        Exchange::MEClientResponse rsp{};
+        rsp.type_            = Exchange::ClientResponseType::CANCELED;
+        rsp.client_id_       = 1;
+        rsp.ticker_id_       = tid;
+        rsp.client_order_id_ = bid_slot.order_id;
+        rsp.market_order_id_ = bid_slot.order_id;
+        rsp.side_            = Side::BUY;
+        rsp.price_           = bid_slot.price;
+        rsp.exec_qty_        = 0;
+        rsp.leaves_qty_      = 0;
+        publishResponse(rsp);
+        bid_slot = {};
+        return;
+      }
       const auto fill_qty = std::min<Qty>(bid_slot.leaves, last_ask_qty_);
       Exchange::MEClientResponse rsp{};
       rsp.type_            = Exchange::ClientResponseType::FILLED;
@@ -248,18 +269,31 @@ namespace Backtest {
       rsp.client_order_id_ = bid_slot.order_id;
       rsp.market_order_id_ = bid_slot.order_id;
       rsp.side_            = Side::BUY;
-      rsp.price_           = last_ask_price_;  // execution at the touch
+      rsp.price_           = last_ask_price_;
       rsp.exec_qty_        = fill_qty;
       rsp.leaves_qty_      = bid_slot.leaves - fill_qty;
       bid_slot.leaves      = rsp.leaves_qty_;
       if (!bid_slot.leaves) bid_slot = {};
       ++num_fills_;
       publishResponse(rsp);
-    }
+    };
 
-    if (ask_slot.leaves > 0
-        && last_bid_price_ != Common::Price_INVALID
-        && ask_slot.price <= last_bid_price_) {
+    auto sweepAsk = [&]() {
+      if (ask_slot.ahead > 0) {
+        Exchange::MEClientResponse rsp{};
+        rsp.type_            = Exchange::ClientResponseType::CANCELED;
+        rsp.client_id_       = 1;
+        rsp.ticker_id_       = tid;
+        rsp.client_order_id_ = ask_slot.order_id;
+        rsp.market_order_id_ = ask_slot.order_id;
+        rsp.side_            = Side::SELL;
+        rsp.price_           = ask_slot.price;
+        rsp.exec_qty_        = 0;
+        rsp.leaves_qty_      = 0;
+        publishResponse(rsp);
+        ask_slot = {};
+        return;
+      }
       const auto fill_qty = std::min<Qty>(ask_slot.leaves, last_bid_qty_);
       Exchange::MEClientResponse rsp{};
       rsp.type_            = Exchange::ClientResponseType::FILLED;
@@ -275,6 +309,18 @@ namespace Backtest {
       if (!ask_slot.leaves) ask_slot = {};
       ++num_fills_;
       publishResponse(rsp);
+    };
+
+    if (bid_slot.leaves > 0
+        && last_ask_price_ != Common::Price_INVALID
+        && bid_slot.price >= last_ask_price_) {
+      sweepBid();
+    }
+
+    if (ask_slot.leaves > 0
+        && last_bid_price_ != Common::Price_INVALID
+        && ask_slot.price <= last_bid_price_) {
+      sweepAsk();
     }
     (void)now_ns;
   }

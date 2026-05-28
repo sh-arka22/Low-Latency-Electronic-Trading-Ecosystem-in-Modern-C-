@@ -130,6 +130,20 @@ namespace Trading {
       }
     }
 
+    // Step 4 — killswitch helper. Cancels both sides and does NOT re-quote.
+    // moveOrders' DEAD-state path is the only way the strategy re-enters the
+    // market; until the next moveOrders call, no new orders go out.
+    auto cancelOrders(TickerId ticker_id) noexcept {
+      for (auto side : {Side::BUY, Side::SELL}) {
+        auto order = &(ticker_side_order_.at(ticker_id).at(sideToIndex(side)));
+        if (order->order_state_ == OMOrderState::LIVE) {
+          START_MEASURE(Trading_OrderManager_cancelOrder);
+          cancelOrder(order);
+          END_MEASURE(Trading_OrderManager_cancelOrder, (*logger_));
+        }
+      }
+    }
+
     auto getOMOrderSideHashMap(TickerId ticker_id) const {
       return &(ticker_side_order_.at(ticker_id));
     }

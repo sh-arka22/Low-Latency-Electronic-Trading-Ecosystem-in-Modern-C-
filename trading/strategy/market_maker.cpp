@@ -44,6 +44,37 @@ namespace Trading {
       const auto  threshold = cfg.threshold_;
       const auto  sigma     = feature_engine_->getVolatility();
 
+      // Step 4 — toxic-flow killswitch. If informed flow (|OFI|) or fast
+      // micro-price displacement is above thresholds, pull both sides and
+      // do NOT re-quote this tick. Cartea/Jaimungal/Penalva 2015 ch.10.4.2.
+      // Defaults disable; activated via cfg.use_killswitch_.
+      // Step 7 — when VPIN > threshold, tighten the killswitch threshold by
+      // vpin_kill_scale_ (more eager pulls) and bump widening by
+      // vpin_widen_mult_ (computed below in the AS block).
+      const double vpin_now = cfg.use_vpin_ ? feature_engine_->getVPIN() : std::nan("");
+      const bool   vpin_toxic = cfg.use_vpin_ && !std::isnan(vpin_now)
+                             && vpin_now > cfg.vpin_threshold_;
+      if (cfg.use_killswitch_) {
+        const double ofi_mag   = std::abs(feature_engine_->getOFI());
+        const double mid       = 0.5 * (bbo->bid_price_ + bbo->ask_price_);
+        const double micro_gap = std::abs(fair_price - mid);
+        const double kill_ofi_eff = vpin_toxic
+            ? cfg.killswitch_ofi_ * cfg.vpin_kill_scale_
+            : cfg.killswitch_ofi_;
+        const double kill_micro_eff = vpin_toxic
+            ? cfg.killswitch_micro_ticks_ * cfg.vpin_kill_scale_
+            : cfg.killswitch_micro_ticks_;
+        if (ofi_mag   > kill_ofi_eff ||
+            micro_gap > kill_micro_eff) {
+          logger_->log("%:% %() % KILL ticker:% ofi:% micro_gap:%\n",
+                       __FILE__, __LINE__, __FUNCTION__,
+                       Common::getCurrentTimeStr(&time_str_),
+                       ticker_id, feature_engine_->getOFI(), micro_gap);
+          order_manager_->cancelOrders(ticker_id);
+          return;
+        }
+      }
+
       Price bid_price = Price_INVALID;
       Price ask_price = Price_INVALID;
       Qty   clip      = clip_base;
@@ -56,8 +87,21 @@ namespace Trading {
       if (as_ready) {
         const auto  q       = static_cast<double>(
             position_keeper_->getPositionInfo(ticker_id)->position_);
-        const auto  gamma   = cfg.gamma_;
         const auto  kappa   = std::max(1e-6, cfg.kappa_);
+
+        // Step 5 — regime-aware γ. σ_short / σ_long > 1 means we're in a
+        // higher-vol regime than baseline → bump γ (wider spread, less risk).
+        // Clamped both directions so a stuck σ_long can't blow γ up.
+        double gamma = cfg.gamma_;
+        if (cfg.use_regime_gamma_ && cfg.regime_gamma_scale_ > 1.0) {
+          const auto sigma_long = feature_engine_->getVolatilityLong();
+          if (sigma_long != Feature_INVALID && sigma_long > 0.0) {
+            const auto ratio = sigma / sigma_long;
+            const auto lo    = 1.0 / cfg.regime_gamma_scale_;
+            const auto hi    = cfg.regime_gamma_scale_;
+            gamma *= std::clamp(ratio, lo, hi);
+          }
+        }
 
         // τ = remaining fraction of session, floored to avoid degeneracy.
         const auto  elapsed_ns = Common::getCurrentNanos() - session_start_ns_;
@@ -73,8 +117,20 @@ namespace Trading {
         const double spread = gamma * sigma * sigma * tau
                             + (2.0 / gamma) * std::log1p(gamma / kappa);
 
-        bid_price = static_cast<Price>(std::floor(reservation - 0.5 * spread));
-        ask_price = static_cast<Price>(std::ceil (reservation + 0.5 * spread));
+        // Step 3 — asymmetric OFI widening. The toxic side widens by
+        // k · max(±OFI, 0); the other side is untouched. Glosten-Milgrom
+        // adverse-selection component, restated for HFT in Barzykin/
+        // Bergault/Guéant 2025 (arxiv:2508.20225). Default 0 = symmetric.
+        // Step 7 — VPIN-toxic regime multiplies the OFI-widening coefficient.
+        const double ofi_now   = cfg.use_ofi_ ? feature_engine_->getOFI() : 0.0;
+        const double widen_k   = vpin_toxic
+            ? cfg.spread_widen_ofi_ * cfg.vpin_widen_mult_
+            : cfg.spread_widen_ofi_;
+        const double bid_widen = widen_k * std::max(-ofi_now, 0.0);
+        const double ask_widen = widen_k * std::max( ofi_now, 0.0);
+
+        bid_price = static_cast<Price>(std::floor(reservation - 0.5 * spread - bid_widen));
+        ask_price = static_cast<Price>(std::ceil (reservation + 0.5 * spread + ask_widen));
 
         // Don't let our quote cross the book (would consume liquidity).
         if (bid_price >= bbo->ask_price_) bid_price = bbo->ask_price_ - 1;

@@ -1,5 +1,17 @@
 #include "strategy/trade_engine.h"
 
+#include <cstdlib>
+
+namespace {
+  // Allow callers (e.g. backtests) to redirect the per-event engine log to
+  // /dev/null. Production live binaries set nothing and get the original file.
+  std::string engineLogPath(Common::ClientId client_id) {
+    if (const char *e = std::getenv("TRADING_ENGINE_LOG_PATH"))
+      return std::string(e);
+    return "trading_engine_" + std::to_string(client_id) + ".log";
+  }
+}
+
 namespace Trading {
 
   TradeEngine::TradeEngine(Common::ClientId client_id,
@@ -12,9 +24,12 @@ namespace Trading {
         outgoing_ogw_requests_(client_requests),
         incoming_ogw_responses_(client_responses),
         incoming_md_updates_(market_updates),
-        logger_("trading_engine_" + std::to_string(client_id) + ".log"),
-        feature_engine_(&logger_),
-        position_keeper_(&logger_),
+        logger_(engineLogPath(client_id)),
+        // Step 1 — FeatureEngine reads smoothing knobs from cfg. Backtest
+        // and showcase scripts always configure ticker 0; multi-ticker live
+        // trading would need per-ticker FeatureEngines, deferred.
+        feature_engine_(&logger_, ticker_cfg.at(0)),
+        position_keeper_(&logger_, &ticker_cfg),
         risk_manager_(&logger_, &position_keeper_, ticker_cfg),
         order_manager_(&logger_, this, risk_manager_) {
 

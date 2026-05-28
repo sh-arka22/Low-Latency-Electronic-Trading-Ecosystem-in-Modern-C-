@@ -40,7 +40,8 @@ namespace Trading {
       return ss.str();
     }
 
-    auto addFill(const Exchange::MEClientResponse *client_response, Logger *logger) noexcept {
+    auto addFill(const Exchange::MEClientResponse *client_response, Logger *logger,
+                 double maker_rebate_bps = 0.0) noexcept {
       const auto old_position   = position_;
       const auto side_index     = sideToIndex(client_response->side_);
       const auto opp_side_index = sideToIndex(
@@ -84,6 +85,18 @@ namespace Trading {
 
       total_pnl_ = unreal_pnl_ + real_pnl_;
 
+      // Step 2 — book maker rebate (or fee) on every fill so per-fill P&L
+      // reflects venue economics live. Positive bps = rebate credited;
+      // negative = fee deducted. Default 0 preserves prior post-hoc fee
+      // accounting in analyze_pnl.py.
+      if (maker_rebate_bps != 0.0) {
+        const double notional = static_cast<double>(client_response->price_)
+                              * static_cast<double>(client_response->exec_qty_);
+        const double rebate   = notional * maker_rebate_bps * 1e-4;
+        real_pnl_  += rebate;
+        total_pnl_ += rebate;
+      }
+
       std::string time_str;
       logger->log("%:% %() % % %\n", __FILE__, __LINE__, __FUNCTION__,
                   Common::getCurrentTimeStr(&time_str),
@@ -119,11 +132,21 @@ namespace Trading {
 
   class PositionKeeper {
   public:
-    PositionKeeper(Common::Logger *logger) : logger_(logger) {}
+    // Step 2 — store per-ticker rebate bps BY VALUE at construction so we
+    // don't depend on the caller's TradeEngineCfgHashMap outliving us.
+    // (Earlier ptr-to-caller-local was dangling once BacktestEngine's ctor
+    // returned, silently disabling the rebate.)
+    PositionKeeper(Common::Logger *logger,
+                   const TradeEngineCfgHashMap *ticker_cfg = nullptr)
+        : logger_(logger) {
+      for (size_t i = 0; i < rebate_bps_.size(); ++i)
+        rebate_bps_[i] = ticker_cfg ? ticker_cfg->at(i).maker_rebate_bps_ : 0.0;
+    }
 
     auto addFill(const Exchange::MEClientResponse *client_response) noexcept {
+      const double rebate_bps = rebate_bps_.at(client_response->ticker_id_);
       ticker_position_.at(client_response->ticker_id_)
-                      .addFill(client_response, logger_);
+                      .addFill(client_response, logger_, rebate_bps);
     }
 
     auto updateBBO(TickerId ticker_id, const BBO *bbo) noexcept {
@@ -157,6 +180,7 @@ namespace Trading {
   private:
     std::string  time_str_;
     Common::Logger *logger_ = nullptr;
+    std::array<double, ME_MAX_TICKERS> rebate_bps_{};   // per-ticker, by value
     std::array<PositionInfo, ME_MAX_TICKERS> ticker_position_;
   };
 }
