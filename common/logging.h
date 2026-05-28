@@ -50,7 +50,7 @@ namespace Common {
     public:
       auto flushQueue() noexcept -> void {
         while (running_) {
-          for (auto next = queue_.getNextToRead(); queue_.size() && next;
+          for (auto next = queue_.getNextToRead(); running_ && queue_.size() && next;
               next = queue_.getNextToRead()) {
             switch (next->type_) {
               case LogType::CHAR:                       file_ << next->u_.c;   break;
@@ -86,9 +86,15 @@ namespace Common {
         std::cerr << Common::getCurrentTimeStr(&time_str)
                   << " Flushing and closing Logger for " << file_name_ << std::endl;
 
-        while (queue_.size()) {
-          using namespace std::literals::chrono_literals;
-          std::this_thread::sleep_for(1s);
+        // LFQueue has no producer backpressure: updateWriteIndex wraps the
+        // ring and ++num_elements_ unconditionally, so a producer that outruns
+        // the consumer inflates num_elements_ orders of magnitude past
+        // store_.size(). Waiting for size()==0 then takes unbounded time. Cap
+        // the wait so shutdown can never hang.
+        using namespace std::literals::chrono_literals;
+        const auto deadline = std::chrono::steady_clock::now() + 5s;
+        while (queue_.size() && std::chrono::steady_clock::now() < deadline) {
+          std::this_thread::sleep_for(50ms);
         }
         running_ = false;
         logger_thread_->join();
