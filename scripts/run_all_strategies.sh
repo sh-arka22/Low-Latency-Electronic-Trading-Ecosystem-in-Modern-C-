@@ -16,6 +16,13 @@ BIN=${BIN:-cmake-build-release/backtest_main}
 OUTDIR=${OUTDIR:-cmake-build-release/out}
 mkdir -p "$OUTDIR"
 
+# Per-event engine debug log can hit 12-18GB on a full-day Binance tape and
+# stall the Logger destructor for hours. Backtests don't need it — the PnL
+# CSV is the deliverable. Send the engine log to /dev/null unless the caller
+# explicitly overrides.
+export TRADING_ENGINE_LOG_PATH="${TRADING_ENGINE_LOG_PATH:-/dev/null}"
+
+
 if [[ ! -x "$BIN" ]]; then
   echo "Building backtest_main..."
   bash build.sh
