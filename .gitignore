@@ -57,3 +57,11 @@ perf.data.old
 
 # Generated notebook outputs
 notebooks/*.html
+
+# Generated backtest data — Binance tape downloads, merged .tape files,
+# and the per-strategy PnL CSVs produced by scripts/run_full_sweep.sh.
+# Repro: bash scripts/run_full_sweep.sh (takes ~6 hours).
+data/
+
+# Local Claude Code agent settings + worktrees (per-user, not shareable)
+.claude/
