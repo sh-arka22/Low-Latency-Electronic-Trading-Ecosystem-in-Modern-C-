@@ -16,7 +16,12 @@ namespace Common {
   constexpr size_t ME_MAX_MARKET_UPDATES = 256 * 1024;
   constexpr size_t ME_MAX_NUM_CLIENTS    = 256;
   constexpr size_t ME_MAX_ORDER_IDS      = 1024 * 1024;
-  constexpr size_t ME_MAX_PRICE_LEVELS   = 256;
+  // Enlarged from 256 so an equity's absolute cent-price maps directly through
+  // priceToIndex (= price % ME_MAX_PRICE_LEVELS) with NO collisions when a full
+  // L3 depth book is reconstructed from a market-by-order tape (LOBSTER replay).
+  // Crypto/synth tapes only ever keep ~2 live levels, so this is transparent for
+  // them. 131072 cents covers prices up to $1310.
+  constexpr size_t ME_MAX_PRICE_LEVELS   = 131072;
 
   // ---- Primitive named types -------------------------------------------
   typedef uint64_t OrderId;

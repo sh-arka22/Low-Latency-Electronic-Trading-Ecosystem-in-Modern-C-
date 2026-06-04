@@ -13,6 +13,7 @@
 #include "strategy/trade_engine.h"
 
 #include "backtest/binance_tape_reader.h"
+#include "backtest/lobster_tape_reader.h"
 
 namespace Backtest {
 
@@ -59,7 +60,8 @@ namespace Backtest {
 
     std::unique_ptr<Trading::TradeEngine> engine_;
 
-    std::unique_ptr<TapeReader> tape_;
+    std::unique_ptr<TapeReader>    tape_;
+    std::unique_ptr<LobsterReader> lobster_;   // native L3 (LOBSTER) replay path
 
     // Synthetic resting order IDs for replayed BBO updates (one per side).
     // We only ever have two live synth orders (bid + ask), so we recycle
@@ -102,6 +104,10 @@ namespace Backtest {
     // ----- helpers -----
     auto applyBookEvent(const BookTopEvent &ev) -> void;
     auto applyTradeEvent(const TradeEvent &ev) -> void;
+
+    // Native L3 (LOBSTER) replay path.
+    auto runLobster() -> void;
+    auto syncBBOFromBook() -> void;
 
     auto pumpClientRequests(Common::Nanos now_ns) -> void;
     auto pumpClientResponses() -> void;

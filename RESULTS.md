@@ -343,3 +343,25 @@ A/B individual v1.2 levers (per-feature decomposition):
 bash scripts/run_step_sweep.sh                    # legacy BTC-only step-by-step sweep
                                                   # → data/showcase/BTCUSDT/_step_sweep/
 ```
+
+---
+
+## 10. Addendum — L3 market-by-order backtest (NASDAQ / LOBSTER)
+
+The sweep above is on **L1** Binance tape. The engine is natively **market-by-order**, so a separate path replays real **NASDAQ LOBSTER** L3 data (AAPL/AMZN/…, 2012-06-21, 10-level) through the *same* strategy code. Reconstruction is **orderbook-driven** — diff LOBSTER's authoritative snapshots into native `ADD`/`MODIFY`/`CANCEL`, seeded from the open. (Naive windowed message-replay leaks pre-open orders and crosses the book: 73,133/73,848 rows; orderbook-driven gives **0/74,927 crossed**.) Full write-up + Mermaid data-flow in [`README.md` § L3 Market-by-Order Backtesting](README.md#l3-market-by-order-backtesting-nasdaq--lobster).
+
+**Risk-adjusted scorecard — AAPL 2012-06-21 (market-wide ≈ −2% day):**
+
+| run | PnL | fills | MAP (sh) | Sharpe | MaxDD | end pos |
+|---|---:|---:|---:|---:|---:|---:|
+| baseline (penny) | +$19,446 | 1,854 | 4,992 | 1.50 | $7,520 | +4,959 |
+| AS (crypto params) | −$53,340 | 21,957 | 4,965 | −2.92 | $55,178 | +4,947 |
+| AS tuned (γ0.05 κ0.05) | −$2,395 | 2,524 | 1,076 | −2.48 | $2,916 | −14 |
+| **AS + v1.2 defensive** | −$32 | 37 | **91** | −0.38 | **$86** | +2 |
+
+**Findings:**
+- **AS implementation verified correct.** A γ sweep un-pins inventory (end pos +4,947 → −53); a κ sweep scales spread/fills (26k → 2.5k fills, −$74k → −$2.4k). The original underperformance was crypto-default params (γ=0.001) mis-scaled for a cent-tick equity — *not* a code bug.
+- **AS + v1.2 is genuine market-making:** 55× lower inventory risk (MAP 91 vs 4,992) and 87× lower drawdown ($86 vs $7,520), staying flat.
+- **Raw PnL on this day favors the baseline** — but its +$19k is an *uncontrolled* +4,959-share directional long that scored only because the market fell ≈2%. A risk-controlled maker structurally cannot beat that on a trending day (see §8; AS literature). The free sample is one trending day, so the **risk-adjusted** metrics are the valid comparison.
+
+Metrics: `scripts/mm_scorecard.py`. Expectation/correlation checks: `scripts/analyze_lobster_pnl.py`.

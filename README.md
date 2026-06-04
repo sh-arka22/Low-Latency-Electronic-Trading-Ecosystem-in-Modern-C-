@@ -21,6 +21,8 @@ A from-scratch C++20 low-latency electronic trading ecosystem: matching engine +
 
 See **[`RESULTS.md`](RESULTS.md)** for the full per-symbol breakdown, per-technique decomposition, and honest "algorithmic-vs-accounting" attribution.
 
+> **L3 update:** the engine is natively **market-by-order** (per-order book + FIFO queues), but the Binance tape is only L1 (top-of-book). The new **[L3 Market-by-Order Backtesting](#l3-market-by-order-backtesting-nasdaq--lobster)** path replays real **NASDAQ LOBSTER** order-by-order data through the *exact same* strategy/engine code — validated end-to-end (0 crossed-book rows), with a risk-adjusted scorecard showing inventory-aware AS is **55× lower inventory risk / 87× lower drawdown** than the naive baseline.
+
 **Reference reading:**
 
 - [`RESULTS.md`](RESULTS.md) — what each technique does, how much it improved PnL, like-for-like decomposition.
@@ -58,7 +60,7 @@ Each row below is one OS thread; everything between threads is a lock-free SPSC 
 | **`OrderManager`** | Per-ticker per-side order book of the *strategy's own* orders. Enforces queue-position hysteresis, calls `RiskManager::checkPreTradeRisk` before any `NEW`, transitions an order state machine (PENDING_NEW → LIVE → PENDING_CANCEL → DEAD). | `trading/strategy/order_manager.{h,cpp}` |
 | **`RiskManager`** | Pre-trade gating: max order size, projected position, min-PnL floor. Returns an enum that `OrderManager` honors before sending a request. | `trading/strategy/risk_manager.{h,cpp}` |
 | **`PositionKeeper`** | Per-ticker position + real/unreal PnL + VWAPs. Updates on every BBO (mark-to-market) and every fill. The maker rebate (v1.2) is booked here. | `trading/strategy/position_keeper.h` |
-| **`BacktestEngine`** | Tape-replay harness. Drives the *real* `MarketMaker` against a `binance_tape_reader` stream, simulates fills via a queue-aware in-process matcher. Phases 1, 2, and 5 of the live trade-flow use identical code; only the exchange round-trip (Phases 3-4) is replaced. | `backtest/backtest_engine.{h,cpp}` |
+| **`BacktestEngine`** | Tape-replay harness. Drives the *real* `MarketMaker` against either a **`binance_tape_reader`** (L1 top-of-book) or a **`lobster_tape_reader`** (L3 market-by-order) stream, simulating fills via a queue-aware in-process matcher. Phases 1, 2, and 5 of the live trade-flow use identical code; only the exchange round-trip (Phases 3-4) is replaced. | `backtest/backtest_engine.{h,cpp}` |
 | **`Logger`** | One per file, async. Producers push `LogElement`s into an `LFQueue`; a dedicated drain thread writes to disk. The hot path never touches I/O. | `common/logging.{h,cpp}` |
 
 ### Technical highlights worth flagging
@@ -251,6 +253,105 @@ That's one full round trip. Every BBO change replays the full Phase 1 → Phase 
 
 ---
 
+## L3 Market-by-Order Backtesting (NASDAQ / LOBSTER)
+
+The Binance tape above is **L1** — top-of-book only (best bid/ask + sizes). But the engine's `MarketOrderBook` is natively **L3 (market-by-order)**: it holds *individual orders* keyed by `order_id`, in per-price-level **FIFO queues**, to full depth, and reconstructs the book from per-order `ADD` / `MODIFY` / `CANCEL` / `TRADE` updates — exactly what a real NASDAQ ITCH feed delivers. To exercise the engine the way it was designed, this branch adds an **L3 replay path** driven by real **NASDAQ LOBSTER** data.
+
+**Dataset.** LOBSTER free sample — NASDAQ `AAPL` / `AMZN` / `GOOG` / `INTC` / `MSFT`, **2012-06-21**, 10 levels deep, in `data/lobster/`. Two row-aligned CSVs per symbol: a **message** file (`Time, Type, OrderID, Size, Price, Direction` — every order event) and an **orderbook** file (the 10-level book snapshot *after* each event).
+
+**Reconstruction is orderbook-driven (the practitioner-recommended method).** A *windowed* message file omits the `ADD`s of orders resting before the window opened (09:30), so naively replaying messages into an empty book leaks stale orders and the book **crosses** — verified: **73,133 of 73,848** sampled rows had `bid ≥ ask`. Per LOBSTER's docs ("message row *k* is the single event taking the orderbook from row *k-1* to row *k*") and standard practice, `LobsterReader` instead **diffs consecutive orderbook snapshots** into native `MEMarketUpdate` `ADD`/`MODIFY`/`CANCEL` (one aggregate order per occupied level, deterministic `OID = side-offset + cent-price`), **seeded from the opening snapshot**, and uses the message file only for the event timestamp and to flag executions (Type 4/5) as `TRADE` prints. Result: the engine reproduces LOBSTER's exact, **non-crossing** full-depth book — **0 of 74,927 rows crossed.**
+
+### Data flow
+
+```mermaid
+flowchart TD
+    subgraph SRC["LOBSTER sample — NASDAQ 2012-06-21 (data/lobster/)"]
+        MSG["message file<br/>Time, Type, OrderID, Size, Price, Direction"]
+        OB["orderbook file<br/>10-level Ask/Bid price+size snapshots"]
+    end
+
+    subgraph RDR["LobsterReader (backtest/lobster_tape_reader)"]
+        DIFF["diff consecutive orderbook snapshots<br/>→ ADD / MODIFY / CANCEL per price level"]
+        TRD["message Type 4/5 (execution)<br/>→ TRADE print"]
+    end
+
+    OB --> DIFF
+    MSG --> TRD
+    MSG -. timestamp .-> DIFF
+
+    DIFF --> MU["native MEMarketUpdate stream<br/>order_id · side · price · qty"]
+    TRD --> MU
+
+    MU --> MOB["MarketOrderBook<br/>full-depth, per-order FIFO queues"]
+    MOB --> TE["TradeEngine callbacks"]
+    TE --> FE["FeatureEngine<br/>σ · OFI · micro-price · VPIN"]
+    TE --> MM["MarketMaker<br/>AS reservation + spread + killswitch"]
+    MM --> OM["OrderManager → RiskManager"]
+    OM --> SIM["queue-aware fill simulator<br/>matchAgainstTrade / matchAgainstBBO"]
+    SIM --> PK["PositionKeeper<br/>position · real/unreal PnL"]
+    PK --> CSV["pnl_*.csv → scripts/mm_scorecard.py<br/>PnL · MAP · Sharpe · MaxDD"]
+```
+
+Everything from `MarketOrderBook` rightward is the **exact same code** that runs live and in the Binance backtest — only the *source* of the `MEMarketUpdate` stream changed (real order-by-order events instead of synthesized top-of-book).
+
+**Engine changes (all additive):**
+- `common/types.h` — `ME_MAX_PRICE_LEVELS` 256 → 131072 so an equity's absolute cent-price maps directly through `priceToIndex` with no collisions for a full-depth book (transparent to crypto/synth, which keep ≤2 live levels).
+- `backtest/lobster_tape_reader.{h,cpp}` *(new)* — the orderbook-driven L3 reader.
+- `backtest/backtest_engine.{h,cpp}` — `runLobster()` replay loop + `syncBBOFromBook()`.
+
+### Validation — every expected microstructure relationship holds
+
+`scripts/analyze_lobster_pnl.py` correlates the outputs against what a correct book must produce:
+
+- **book integrity:** 0 crossed rows; `bid ≤ mid ≤ ask` always;
+- **real price path recovered:** AAPL \$585.62 → \$577.61, AMZN \$223.56 → \$220.57 (both ≈ −1.3%);
+- **same tape ⇒ identical market:** `corr(mid, baseline-vs-AS) = 1.00000`;
+- **adverse selection present:** `corr(position, mid) < 0` on the down day, in every run.
+
+### AS implementation — verified correct
+
+AS first *underperformed* baseline. Inspecting the decision log showed the A-S math is faithful, but the **inventory-skew term `q·γ·σ²·τ` was only ≈ 1.5¢ even at 4,000+ shares** — i.e. **crypto defaults (γ=0.001) mis-scaled for a cent-tick equity, not a code bug.** Two sweeps confirm both control knobs behave exactly as theory predicts:
+
+| sweep | controls | observed |
+|---|---|---|
+| γ ↑ (0.001 → 0.10) | inventory | end position un-pins: **+4,947 → −53** |
+| κ ↓ (1.5 → 0.05) | spread / fill rate | fills **26k → 2.5k**, bleed **−\$74k → −\$2.4k** |
+
+### Scorecard — AAPL 2012-06-21 (a market-wide ≈ −2% day)
+
+Market-making is judged on **risk-adjusted** metrics — Max Drawdown, PnL-to-MAP (PnL ÷ max absolute position), Sharpe — not raw PnL on one path (Falces-Marín, *PLOS One* 2022; Guéant 2012):
+
+| run | PnL | fills | MAP (sh) | Sharpe | MaxDD | end pos |
+|---|---:|---:|---:|---:|---:|---:|
+| baseline (penny) | **+\$19,446** | 1,854 | 4,992 | 1.50 | \$7,520 | +4,959 |
+| AS (crypto params) | −\$53,340 | 21,957 | 4,965 | −2.92 | \$55,178 | +4,947 |
+| AS tuned (γ0.05 κ0.05) | −\$2,395 | 2,524 | 1,076 | −2.48 | \$2,916 | −14 |
+| **AS + v1.2 defensive** | −\$32 | 37 | **91** | −0.38 | **\$86** | +2 |
+
+**Honest reading.** AS + v1.2 is *genuine* market-making — **55× less inventory risk** (MAP 91 vs 4,992) and **87× less drawdown** (\$86 vs \$7,520), staying flat. The baseline's "+\$19k" is a disguised **+4,959-share directional long** that scored only because the whole market fell ≈2% that day. On raw PnL a risk-controlled maker structurally *cannot* beat an accidental directional position on a trending day — exactly the adverse-selection result documented in [`RESULTS.md`](RESULTS.md) §8 and the AS literature. The free LOBSTER sample is a single trending day, so the **risk-adjusted metrics are the valid comparison**; a clean PnL win would require a non-trending session or an explicit directional signal.
+
+### Run it
+
+```bash
+MSG=data/lobster/LOBSTER_SampleFile_AAPL_2012-06-21_10/AAPL_2012-06-21_34200000_57600000_message_10.csv
+
+# baseline (threshold-pennying)
+./cmake-build-release/backtest_main aapl_baseline pnl_aapl_baseline.csv "$MSG" \
+  lobster 0.01 0 100 0.5 500 5000 -1e9  0 0.1 1.5 6.5  0 0.0 0  0 1.0
+
+# AS + v1.2 defensive, equities-tuned (γ=0.05, κ=0.05, killswitch + widening + regime-γ + VPIN)
+USE_KILLSWITCH=1 KILLSWITCH_OFI=6 KILLSWITCH_MICRO_TICKS=2 SPREAD_WIDEN_OFI=1.0 \
+USE_REGIME_GAMMA=1 REGIME_GAMMA_SCALE=2 USE_STOIKOV_MICRO=1 USE_VPIN=1 VPIN_BUCKET_SIZE=50000 \
+  ./cmake-build-release/backtest_main aapl_as_v12 pnl_aapl_as_v12.csv "$MSG" \
+  lobster 0.01 0 100 0.5 500 5000 -1e9  1 0.05 0.05 6.5  1 0.02 2  1 1.0
+
+python3 scripts/mm_scorecard.py pnl_aapl_baseline.csv pnl_aapl_as_v12.csv
+```
+
+> `format=lobster`: the reader derives the orderbook path from the message path automatically. The `tick_size` CLI arg is ignored for LOBSTER — prices are converted to integer **cents** internally.
+
+---
+
 ## Quickstart
 
 ### 1. Backtest — full v1.1 + v1.2 comparison on 24h Binance tape
@@ -369,8 +470,9 @@ electronic_trading_ecosystem/
 │                       vpin.h                    ← v1.2 BVC bucketed PIN
 │
 ├── backtest/           # tape-replay harness (Phases 3-4 replaced by simulator)
-│   ├── backtest_main.cpp  backtest_engine.{h,cpp}
-│   └── binance_tape_reader.{h,cpp}
+│   ├── backtest_main.cpp     backtest_engine.{h,cpp}
+│   ├── binance_tape_reader.{h,cpp}    ← L1 top-of-book (Binance) replay
+│   └── lobster_tape_reader.{h,cpp}    ← L3 market-by-order (NASDAQ/LOBSTER) replay
 │
 ├── benchmarks/         # Ch12 + Day 6 measurement binaries
 │   ├── logger_benchmark.cpp    release_benchmark.cpp
@@ -381,6 +483,8 @@ electronic_trading_ecosystem/
 │   ├── run_demo.sh              ← live exchange+client demo
 │   ├── calibrate_gamma_kappa.py ← γ/κ helper from filled CSV
 │   ├── analyze_pnl.py           ← post-hoc Sharpe/DD/fill-rate
+│   ├── analyze_lobster_pnl.py   ← L3 expected-relationship correlation checks
+│   ├── mm_scorecard.py          ← risk-adjusted MM scorecard (PnL/MAP/Sharpe/MaxDD)
 │   └── plot.py                  ← latency / pnl / jitter renderers
 │
 ├── notebooks/          # rendered analysis (open the .html files directly)
@@ -388,7 +492,8 @@ electronic_trading_ecosystem/
 │   └── perf_analysis.{ipynb,html}
 │
 ├── data/
-│   ├── BTCUSDT-2024-03-28.tape    ETHUSDT-2024-03-28.tape    SOLUSDT-2024-03-28.tape
+│   ├── BTCUSDT-2024-03-28.tape   ETHUSDT-...   SOLUSDT-...   ← L1 Binance tapes
+│   ├── lobster/LOBSTER_SampleFile_<SYM>_2012-06-21_10/       ← L3 NASDAQ (message + orderbook)
 │   └── showcase/<SYMBOL>/pnl_<strategy>.csv  ← sweep outputs
 │
 └── docs/               # rendered figures

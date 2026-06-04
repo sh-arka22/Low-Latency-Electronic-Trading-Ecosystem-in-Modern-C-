@@ -36,7 +36,15 @@ namespace Backtest {
     // synchronously by calling its onXxx methods directly. The engine's
     // internal thread loop would race with our replay clock.
 
-    tape_ = std::make_unique<TapeReader>(cfg_.tape);
+    if (cfg_.tape.format == "lobster") {
+      LobsterReader::Config lc;
+      lc.message_path = cfg_.tape.path;
+      lc.ticker_id    = cfg_.ticker_id;
+      lc.max_events   = cfg_.tape.max_events;
+      lobster_ = std::make_unique<LobsterReader>(std::move(lc));
+    } else {
+      tape_ = std::make_unique<TapeReader>(cfg_.tape);
+    }
 
     for (auto &row : live_)
       for (auto &o : row)
@@ -52,6 +60,8 @@ namespace Backtest {
   }
 
   auto BacktestEngine::run() -> void {
+    if (cfg_.tape.format == "lobster") { runLobster(); return; }
+
     Nanos last_pnl_ns = 0;
     static constexpr Nanos kPnlSamplePeriodNs = 50'000'000;   // every 50 ms
 
@@ -77,6 +87,55 @@ namespace Backtest {
     }
 
     // Drain.
+    pumpClientResponses();
+    recordPnL(last_pnl_ns);
+  }
+
+  // --------------------------------------------------------------------
+  // Native L3 (LOBSTER) replay: feed the engine its real order-by-order
+  // MEMarketUpdate stream (ADD/MODIFY/CANCEL/TRADE) so the full-depth book,
+  // per-order FIFO queues and queue priority are reconstructed faithfully --
+  // the same path the live MarketDataConsumer drives. No synthetic top-of-book
+  // adapter (that is the L1/Binance path in applyBookEvent).
+  // --------------------------------------------------------------------
+  auto BacktestEngine::syncBBOFromBook() -> void {
+    const auto *bbo = engine_->orderBook(cfg_.ticker_id)->getBBO();
+    last_bid_price_ = bbo->bid_price_;
+    last_ask_price_ = bbo->ask_price_;
+    last_bid_qty_   = (bbo->bid_qty_ == Common::Qty_INVALID) ? 0 : bbo->bid_qty_;
+    last_ask_qty_   = (bbo->ask_qty_ == Common::Qty_INVALID) ? 0 : bbo->ask_qty_;
+  }
+
+  auto BacktestEngine::runLobster() -> void {
+    Nanos last_pnl_ns = 0;
+    static constexpr Nanos kPnlSamplePeriodNs = 50'000'000;   // every 50 ms
+
+    while (auto ev = lobster_->next()) {
+      const Nanos now_ns = ev->first;
+      const auto &mu     = ev->second;
+
+      // 1) Apply the real market update to the client book + strategy callbacks.
+      publishMarketUpdate(mu);
+      // 2) Refresh our BBO mirror from the reconstructed full-depth book.
+      syncBBOFromBook();
+      // 3) Simulate fills for our resting algo orders against this event
+      //    (queue position seeded from the real book depth in pumpClientRequests).
+      if (mu.type_ == Exchange::MarketUpdateType::TRADE) {
+        const TradeEvent te{now_ns, mu.price_, mu.qty_, mu.side_};
+        matchAgainstTrade(te);
+      } else {
+        matchAgainstBBO(now_ns);
+      }
+      // 4) Drain the algo's new/cancel requests and feed back ACK/CANCELED.
+      pumpClientRequests(now_ns);
+      pumpClientResponses();
+
+      if (now_ns - last_pnl_ns >= kPnlSamplePeriodNs) {
+        recordPnL(now_ns);
+        last_pnl_ns = now_ns;
+      }
+    }
+
     pumpClientResponses();
     recordPnL(last_pnl_ns);
   }
