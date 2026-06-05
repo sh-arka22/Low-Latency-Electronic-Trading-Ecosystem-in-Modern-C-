@@ -62,6 +62,19 @@ notebooks/*.html
 # and the per-strategy PnL CSVs produced by scripts/run_full_sweep.sh.
 # Repro: bash scripts/run_full_sweep.sh (takes ~6 hours).
 data/
+pnl_*.csv
+
+# Transient error / stderr output from backtest runs
+*.err
+
+# Personal study & pipeline reference docs (not project source)
+study_guide.md
+study_indepth.md
+math_pipeline.md
+order_execution_pipeline.md
+
+# ML planning docs (no code yet — track when implementation starts)
+ml/
 
 # Local Claude Code agent settings + worktrees (per-user, not shareable)
 .claude/
