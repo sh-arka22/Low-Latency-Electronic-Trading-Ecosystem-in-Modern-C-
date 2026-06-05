@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg)](#build)
 [![Status](https://img.shields.io/badge/status-runnable-success.svg)](#quickstart)
 
-A from-scratch C++20 low-latency electronic trading ecosystem: matching engine + UDP multicast market data + TCP order entry + algorithmic trading client + inventory-aware market-making strategy + tape-replay backtest. Built following Sourav Ghosh's *Building Low Latency Applications with C++* (Packt, 2023) chapters 5–12, with v1.1 and v1.2 strategy upgrades on top.
+A from-scratch C++20 low-latency electronic trading ecosystem: matching engine + UDP multicast market data + TCP order entry + algorithmic trading client + inventory-aware market-making strategy + tape-replay backtest harness (~8,000 LOC C++). Built following Sourav Ghosh's *Building Low Latency Applications with C++* (Packt, 2023) chapters 5–12, with v1.1 and v1.2 strategy upgrades on top.
 
 **Strategy stack (each layer builds on the one below):**
 
@@ -28,7 +28,7 @@ See **[`RESULTS.md`](RESULTS.md)** for the full per-symbol breakdown, per-techni
 - [`RESULTS.md`](RESULTS.md) — what each technique does, how much it improved PnL, like-for-like decomposition.
 - [`STRATEGY.md`](STRATEGY.md) — math + code map for the v1.1 quoter.
 - [`PERF.md`](PERF.md) — every latency percentile, every benchmark, reproducible.
-- [`notebooks/strategy_compare.html`](notebooks/strategy_compare.html) — rendered comparison plots.
+- [`notebooks/strategy_compare.ipynb`](notebooks/strategy_compare.ipynb) — comparison plots (run `jupyter nbconvert --execute` to render HTML).
 
 ---
 
@@ -65,6 +65,7 @@ Each row below is one OS thread; everything between threads is a lock-free SPSC 
 
 ### Technical highlights worth flagging
 
+- **~8,000 lines of C++20** across matching engine, market data, order entry, strategy, and backtest modules — plus ~1,300 lines of Python/Shell scripts for analysis and automation.
 - **Zero-allocation hot path.** `MemPool<T>` plus `LFQueue<T>` everywhere; `placement new` reuses objects in-place. After warmup, the matching engine and the strategy thread don't call `malloc` on any per-event code path.
 - **Async lock-free logger.** Producer pushes `LogElement`s into a `LFQueue<LogElement>`; drain thread serializes to disk. The block-copy string variant in `opt_logging.h` is **54× faster** than per-char (`benchmarks/logger_benchmark.cpp`).
 - **NDEBUG-gated MemPool.** Both `ASSERT()`s in `allocate()`/`deallocate()` compile away in release builds — **~25× faster** alloc/dealloc (`benchmarks/release_benchmark.cpp`).
@@ -359,11 +360,18 @@ python3 scripts/mm_scorecard.py pnl_aapl_baseline.csv pnl_aapl_as_v12.csv
 ```bash
 cd electronic_trading_ecosystem
 bash build.sh
+
+# Download Binance tape data first (requires internet; ~2 GB)
+bash scripts/download_binance.sh
+python3 scripts/merge_binance.py
+
 bash scripts/run_full_sweep.sh                   # 5 strategies × 3 symbols = 15 backtests
                                                   # ~6 hours wall-time, single process
 # outputs: data/showcase/<SYMBOL>/pnl_<strategy>.csv
-# then read RESULTS.md or open notebooks/strategy_compare.html
+# then read RESULTS.md or run: jupyter nbconvert --execute notebooks/showcase_analysis.ipynb
 ```
+
+> **Note:** The `data/` directory is gitignored (large binary tapes). You must run the download + merge scripts above before the sweep. LOBSTER data (for L3 backtests) is available from [LOBSTER's website](https://lobsterdata.com/info/DataSamples.php) — place the sample CSVs under `data/lobster/`.
 
 Single-symbol smoke test:
 ```bash
@@ -459,6 +467,8 @@ electronic_trading_ecosystem/
 │   ├── trading_main.cpp
 │   ├── market_data/    market_data_consumer.{h,cpp}
 │   ├── order_gw/       order_gateway.{h,cpp}
+│   │   └── binance/    binance_md_consumer.{h,cpp}    ← Binance WS scaffold (26 TODOs)
+│   │                   binance_ws_gateway.{h,cpp}
 │   └── strategy/       trade_engine.{h,cpp}      ← Phase 1+5 dispatch
 │                       feature_engine.h          ← σ, OFI, micro-price, σ_long, VPIN
 │                       position_keeper.h         ← position, PnL, maker rebate
@@ -466,7 +476,7 @@ electronic_trading_ecosystem/
 │                       market_maker.{h,cpp}      ← Phase 2 decisions (v1.1 + v1.2)
 │                       liquidity_taker.{h,cpp}   ← alternative TAKER algo
 │                       order_manager.{h,cpp}     ← Phase 3 dispatch + hysteresis
-│                       risk_manager.{h,cpp}     ← pre-trade gating
+│                       risk_manager.{h,cpp}      ← pre-trade gating
 │                       vpin.h                    ← v1.2 BVC bucketed PIN
 │
 ├── backtest/           # tape-replay harness (Phases 3-4 replaced by simulator)
@@ -481,22 +491,33 @@ electronic_trading_ecosystem/
 ├── scripts/
 │   ├── run_full_sweep.sh        ← unified v1.1+v1.2 backtest sweep
 │   ├── run_demo.sh              ← live exchange+client demo
+│   ├── run_all_strategies.sh    ← v1.1 N-symbol strategy comparison
+│   ├── run_step_sweep.sh        ← v1.2 BTC-only per-feature decomposition
+│   ├── run_showcase.sh          ← quick showcase run
+│   ├── download_binance.sh      ← fetch Binance tape data
+│   ├── merge_binance.py         ← merge raw bookTicker + trades → .tape
+│   ├── lobster_to_tape.py       ← LOBSTER L3 → .tape converter
 │   ├── calibrate_gamma_kappa.py ← γ/κ helper from filled CSV
 │   ├── analyze_pnl.py           ← post-hoc Sharpe/DD/fill-rate
 │   ├── analyze_lobster_pnl.py   ← L3 expected-relationship correlation checks
 │   ├── mm_scorecard.py          ← risk-adjusted MM scorecard (PnL/MAP/Sharpe/MaxDD)
 │   └── plot.py                  ← latency / pnl / jitter renderers
 │
-├── notebooks/          # rendered analysis (open the .html files directly)
-│   ├── strategy_compare.{ipynb,html}
-│   └── perf_analysis.{ipynb,html}
+├── notebooks/          # analysis notebooks (run to generate HTML)
+│   ├── strategy_compare.ipynb   ← 5-strategy PnL/inventory/drawdown comparison
+│   ├── showcase_analysis.ipynb  ← full-sweep analysis + figures
+│   ├── perf_analysis.ipynb      ← latency percentile analysis
+│   └── img/                     ← pre-rendered figures (cumulative_pnl, drawdown, etc.)
 │
-├── data/
+├── data/               # ⚠️ gitignored — download via scripts/download_binance.sh
 │   ├── BTCUSDT-2024-03-28.tape   ETHUSDT-...   SOLUSDT-...   ← L1 Binance tapes
 │   ├── lobster/LOBSTER_SampleFile_<SYM>_2012-06-21_10/       ← L3 NASDAQ (message + orderbook)
-│   └── showcase/<SYMBOL>/pnl_<strategy>.csv  ← sweep outputs
+│   └── showcase/<SYMBOL>/pnl_<strategy>.csv                  ← sweep outputs
 │
-└── docs/               # rendered figures
+└── docs/               # documentation + rendered figures
+    ├── LEARNING_MAP.md     ← first-principles study plan
+    ├── resume_bullets.md   ← drop-in resume bullets
+    ├── showcase.md         ← v1.1 showcase walkthrough
     ├── latency.png         latency_summary.csv
     └── jitter.png          jitter_pinned.hgrm   jitter_unpinned.hgrm
 ```
